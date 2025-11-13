@@ -151,7 +151,41 @@ def parse_args() -> argparse.Namespace:
     # MELD Graph specific arguments
     parser.add_argument(
         "--fs-version",
-        help="FreeSurfer version to use for MELD Graph input (default: uses DEFAULT_FS_VERSION)"
+        help="FreeSurfer version to use for MELD Graph input (default: uses DEFAULT_MELD_FS_VERSION)"
+    )
+
+    parser.add_argument(
+        "--download-weights",
+        action="store_true",
+        help="Download MELD Graph model weights (run once before first use)"
+    )
+
+    parser.add_argument(
+        "--harmonize-only",
+        action="store_true",
+        help="Compute harmonization parameters only (requires --harmo-code)"
+    )
+
+    parser.add_argument(
+        "--harmo-code",
+        help="Harmonization code for scanner (e.g., H1, H2). Use when running with harmonization"
+    )
+
+    parser.add_argument(
+        "--demographics",
+        help="Path to demographics CSV file for harmonization (optional - will auto-generate from participants.tsv if not provided)"
+    )
+
+    parser.add_argument(
+        "--use-precomputed-fs",
+        action="store_true",
+        help="Use precomputed FreeSurfer outputs instead of running FreeSurfer"
+    )
+
+    parser.add_argument(
+        "--skip-segmentation",
+        action="store_true",
+        help="Skip FreeSurfer segmentation step (use with --use-precomputed-fs)"
     )
 
     parser.add_argument(

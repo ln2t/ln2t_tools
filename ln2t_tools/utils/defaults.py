@@ -8,6 +8,7 @@ LOCKFILE_DIR = Path("/tmp/ln2t_tools_locks")
 # Default directories
 DEFAULT_RAWDATA = Path.home() / Path("rawdata")
 DEFAULT_DERIVATIVES = Path.home() / Path("derivatives")
+DEFAULT_CODE = Path.home() / Path("code")
 DEFAULT_APPTAINER_DIR = Path("/opt/apptainer")
 
 # Tool versions
@@ -16,6 +17,7 @@ DEFAULT_FMRIPREP_VERSION = "25.1.4"
 DEFAULT_QSIPREP_VERSION = "1.0.1"
 DEFAULT_QSIRECON_VERSION = "1.1.1"
 DEFAULT_MELDGRAPH_VERSION = "v2.2.3"
+DEFAULT_MELD_FS_VERSION = "7.2.0"  # MELD Graph requires FreeSurfer 7.2.0 or earlier
 
 # FreeSurfer license
 DEFAULT_FS_LICENSE = Path("/opt/freesurfer/.license")

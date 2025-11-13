@@ -1,5 +1,6 @@
 import os
 import logging
+import shutil
 import pandas as pd
 from typing import Optional, List, Dict
 from pathlib import Path
@@ -17,16 +18,27 @@ from ln2t_tools.utils.utils import (
     launch_apptainer,
     build_apptainer_cmd,
     get_freesurfer_output,
-    InstanceManager
+    InstanceManager,
+    setup_meld_data_structure,
+    create_meld_config_json,
+    create_meld_dataset_description,
+    prepare_meld_input_symlinks,
+    download_meld_weights
+)
+from ln2t_tools.utils.demographics import (
+    create_meld_demographics_from_participants,
+    validate_meld_demographics
 )
 from ln2t_tools.utils.defaults import (
     DEFAULT_RAWDATA,
     DEFAULT_DERIVATIVES,
+    DEFAULT_CODE,
     DEFAULT_FS_VERSION,
     DEFAULT_FMRIPREP_VERSION,
     DEFAULT_QSIPREP_VERSION,
     DEFAULT_QSIRECON_VERSION,
-    DEFAULT_MELDGRAPH_VERSION
+    DEFAULT_MELDGRAPH_VERSION,
+    DEFAULT_MELD_FS_VERSION
 )
 
 # Setup logging
@@ -182,8 +194,15 @@ def setup_directories(args) -> tuple[Path, Path, Path]:
             f"Dataset '{args.dataset}' not found in {DEFAULT_RAWDATA}\n"
             f"Available datasets:\n  - {datasets_str}"
         )
+    
+    # Resolve symlinks to get actual filesystem paths for Apptainer bindings
+    dataset_rawdata = dataset_rawdata.resolve()
+    logger.debug(f"Resolved rawdata path: {dataset_rawdata}")
 
     dataset_derivatives = Path(DEFAULT_DERIVATIVES) / f"{args.dataset}-derivatives"
+    # Resolve symlinks for derivatives as well
+    dataset_derivatives = dataset_derivatives.resolve()
+    logger.debug(f"Resolved derivatives path: {dataset_derivatives}")
     version = (DEFAULT_FS_VERSION if args.tool == 'freesurfer' 
               else DEFAULT_FMRIPREP_VERSION if args.tool == 'fmriprep'
               else DEFAULT_QSIPREP_VERSION if args.tool == 'qsiprep'
@@ -195,6 +214,25 @@ def setup_directories(args) -> tuple[Path, Path, Path]:
     
     output_dir.mkdir(parents=True, exist_ok=True)
     return dataset_rawdata, dataset_derivatives, output_dir
+
+
+def launch_and_check(apptainer_cmd: str, tool_name: str, participant_label: str) -> None:
+    """Launch Apptainer command and check for errors.
+    
+    Args:
+        apptainer_cmd: Command to execute
+        tool_name: Name of the tool for error messages
+        participant_label: Subject ID for error messages
+        
+    Raises:
+        RuntimeError: If the command fails
+    """
+    exit_code = launch_apptainer(apptainer_cmd=apptainer_cmd)
+    if exit_code != 0:
+        error_msg = f"{tool_name} failed for participant {participant_label} with exit code {exit_code}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
 
 def process_freesurfer_subject(
     layout: BIDSLayout,
@@ -265,18 +303,65 @@ def process_single_t1w(
     )
 
     # Build FreeSurfer command options for additional contrasts
+    # Convert paths to container paths (relative to /rawdata)
     fs_options = []
+    
     if additional_contrasts['t2w']:
         logger.info(f"Found T2w image for {participant_label}")
-        fs_options.append(f"-T2 {additional_contrasts['t2w']}")
+        # Convert host path to container path
+        t2w_host = Path(additional_contrasts['t2w'])
+        try:
+            t2w_relative = t2w_host.relative_to(dataset_rawdata)
+            t2w_container = f"/rawdata/{t2w_relative}"
+        except ValueError:
+            t2w_container = str(t2w_host)
+        fs_options.append(f"-T2 {t2w_container}")
         fs_options.append("-T2pial")  # Use T2 for pial surface
     
     if additional_contrasts['flair']:
         logger.info(f"Found FLAIR image for {participant_label}")
-        fs_options.append(f"-FLAIR {additional_contrasts['flair']}")
+        # Convert host path to container path
+        flair_host = Path(additional_contrasts['flair'])
+        try:
+            flair_relative = flair_host.relative_to(dataset_rawdata)
+            flair_container = f"/rawdata/{flair_relative}"
+        except ValueError:
+            flair_container = str(flair_host)
+        fs_options.append(f"-FLAIR {flair_container}")
         fs_options.append("-FLAIRpial")  # Use FLAIR for pial surface
         if additional_contrasts['t2w']:
             logger.info("Both T2w and FLAIR images found, using only FLAIR for pial surface")
+
+    # Verify input files exist before launching
+    logger.info("Verifying input files exist on host:")
+    t1w_path = Path(t1w)
+    logger.info(f"  T1w: {t1w_path}")
+    if t1w_path.exists():
+        logger.info(f"    ✓ File exists (size: {t1w_path.stat().st_size / (1024*1024):.2f} MB)")
+    else:
+        logger.error(f"    ✗ File NOT found!")
+        raise FileNotFoundError(f"T1w file not found: {t1w_path}")
+    
+    if additional_contrasts['t2w']:
+        t2w_path = Path(additional_contrasts['t2w'])
+        logger.info(f"  T2w: {t2w_path}")
+        if t2w_path.exists():
+            logger.info(f"    ✓ File exists (size: {t2w_path.stat().st_size / (1024*1024):.2f} MB)")
+        else:
+            logger.warning(f"    ✗ File NOT found!")
+    
+    if additional_contrasts['flair']:
+        flair_path = Path(additional_contrasts['flair'])
+        logger.info(f"  FLAIR: {flair_path}")
+        if flair_path.exists():
+            logger.info(f"    ✓ File exists (size: {flair_path.stat().st_size / (1024*1024):.2f} MB)")
+        else:
+            logger.warning(f"    ✗ File NOT found!")
+    
+    logger.info(f"Binding directories:")
+    logger.info(f"  Rawdata: {dataset_rawdata} -> /rawdata (read-only)")
+    logger.info(f"  Derivatives: {dataset_derivatives} -> /derivatives")
+    logger.info(f"  FreeSurfer license: {args.fs_license} -> /usr/local/freesurfer/.license")
 
     # Build and launch FreeSurfer command
     apptainer_cmd = build_apptainer_cmd(
@@ -292,7 +377,7 @@ def process_single_t1w(
         run=entities.get('run'),
         additional_options=" ".join(fs_options)
     )
-    launch_apptainer(apptainer_cmd=apptainer_cmd)
+    launch_and_check(apptainer_cmd, "FreeSurfer", participant_label)
 
 def build_bids_subdir(
     participant_label: str,
@@ -389,7 +474,7 @@ def process_fmriprep_subject(
         omp_nthreads=getattr(args, 'omp_nthreads', 8),
         fs_subjects_dir=fs_output_dir
     )
-    launch_apptainer(apptainer_cmd=apptainer_cmd)
+    launch_and_check(apptainer_cmd, "fMRIPrep", participant_label)
 
 def process_qsiprep_subject(
     layout: BIDSLayout,
@@ -472,7 +557,7 @@ def process_qsiprep_subject(
         nprocs=getattr(args, 'nprocs', 8),
         omp_nthreads=getattr(args, 'omp_nthreads', 8)
     )
-    launch_apptainer(apptainer_cmd=apptainer_cmd)
+    launch_and_check(apptainer_cmd, "QSIPrep", participant_label)
 
 def process_qsirecon_subject(
     layout: BIDSLayout,
@@ -494,7 +579,7 @@ def process_qsirecon_subject(
     """
     # QSIRecon requires QSIPrep preprocessed data
     # Check for QSIPrep derivatives
-    qsiprep_version = getattr(args, 'qsiprep_version', DEFAULT_QSIPREP_VERSION)
+    qsiprep_version = getattr(args, 'qsiprep_version', None) or DEFAULT_QSIPREP_VERSION
     qsiprep_dir = dataset_derivatives / f"qsiprep_{qsiprep_version}"
     
     if not qsiprep_dir.exists():
@@ -544,7 +629,7 @@ def process_qsirecon_subject(
         omp_nthreads=getattr(args, 'omp_nthreads', 8),
         additional_options=getattr(args, 'additional_options', '')
     )
-    launch_apptainer(apptainer_cmd=apptainer_cmd)
+    launch_and_check(apptainer_cmd, "QSIRecon", participant_label)
 
 def process_meldgraph_subject(
     layout: BIDSLayout,
@@ -552,9 +637,16 @@ def process_meldgraph_subject(
     args,
     dataset_rawdata: Path,
     dataset_derivatives: Path,
+    dataset_code: Path,
     apptainer_img: str
 ) -> None:
     """Process a single subject with MELD Graph for lesion detection.
+    
+    MELD Graph has a specific directory structure and workflow:
+    1. Setup MELD data structure in ~/code/{dataset}-code/meld_graph_{version}/
+    2. Create symlinks to input data in MELD format
+    3. Optionally use precomputed FreeSurfer outputs
+    4. Run prediction with optional harmonization
     
     Args:
         layout: BIDSLayout object for BIDS dataset
@@ -562,50 +654,381 @@ def process_meldgraph_subject(
         args: Parsed command line arguments
         dataset_rawdata: Path to BIDS rawdata directory
         dataset_derivatives: Path to derivatives directory
+        dataset_code: Path to dataset code directory
         apptainer_img: Path to Apptainer image
     """
-    # MELD Graph requires FreeSurfer output
-    # Check for FreeSurfer derivatives
-    fs_version = getattr(args, 'fs_version', DEFAULT_FS_VERSION)
-    fs_subjects_dir = get_freesurfer_output(
+    meld_version = args.version or DEFAULT_MELDGRAPH_VERSION
+    
+    # Setup MELD-specific directory structure
+    meld_data_dir, meld_config_dir, meld_output_dir = setup_meld_data_structure(
         dataset_derivatives,
-        participant_label,
-        fs_version
+        dataset_code,
+        meld_version
     )
     
-    if not fs_subjects_dir:
-        logger.warning(
-            f"No FreeSurfer output found for participant {participant_label}. "
-            f"MELD Graph requires FreeSurfer recon-all to be completed first."
-        )
-        return
-
-    # Build output directory path
-    output_subdir = build_bids_subdir(participant_label)
-    meld_version = args.version or DEFAULT_MELDGRAPH_VERSION
-    output_participant_dir = dataset_derivatives / (
-        args.output_label or 
-        f"meld_graph_{meld_version}"
-    ) / output_subdir
-
-    if output_participant_dir.exists():
-        logger.info(f"Output exists, skipping: {output_participant_dir}")
-        return
-
-    # Build and launch MELD Graph command
-    output_dir = dataset_derivatives / (args.output_label or f"meld_graph_{meld_version}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Create configuration files if they don't exist
+    create_meld_config_json(meld_config_dir, use_bids=True)
+    create_meld_dataset_description(meld_config_dir, args.dataset)
     
+    # Create input symlinks for participant
+    if not prepare_meld_input_symlinks(
+        meld_data_dir / "input",
+        layout,
+        participant_label
+    ):
+        logger.error(f"Failed to prepare input data for {participant_label}")
+        return
+    
+    # Check for FreeSurfer outputs if needed
+    fs_derivatives_dir = None
+    use_skip_segmentation = getattr(args, 'skip_segmentation', False)
+    
+    if getattr(args, 'use_precomputed_fs', False):
+        fs_version = getattr(args, 'fs_version', None) or DEFAULT_MELD_FS_VERSION
+        fs_subject_dir = get_freesurfer_output(
+            dataset_derivatives,
+            participant_label,
+            fs_version
+        )
+        
+        if not fs_subject_dir:
+            logger.warning(
+                f"No FreeSurfer output found for participant {participant_label}. "
+                f"MELD will run FreeSurfer segmentation.\n"
+                f"Note: MELD Graph requires FreeSurfer 7.2.0 or earlier (current default: {DEFAULT_MELD_FS_VERSION})."
+            )
+        else:
+            # Get the FreeSurfer derivatives directory (freesurfer_7.2.0/)
+            fs_derivatives_dir = dataset_derivatives / f"freesurfer_{fs_version}"
+            logger.info(f"Using precomputed FreeSurfer outputs from: {fs_derivatives_dir}")
+            
+            # Create symlink to FreeSurfer output in MELD structure
+            meld_fs_outputs_dir = meld_output_dir / "fs_outputs"
+            fs_subject_src = fs_derivatives_dir / f"sub-{participant_label}"
+            fs_subject_dest = meld_fs_outputs_dir / f"sub-{participant_label}"
+            
+            # Remove existing symlink/directory if it exists
+            if fs_subject_dest.exists() or fs_subject_dest.is_symlink():
+                if fs_subject_dest.is_symlink():
+                    fs_subject_dest.unlink()
+                else:
+                    logger.warning(f"Removing existing directory: {fs_subject_dest}")
+                    shutil.rmtree(fs_subject_dest)
+            
+            # Create symlink
+            fs_subject_dest.symlink_to(fs_subject_src)
+            logger.info(f"Linked FreeSurfer output: {fs_subject_src} -> {fs_subject_dest}")
+            logger.info("MELD will detect existing FreeSurfer output and skip recon-all")
+            
+            # Check for and create completion marker if missing
+            scripts_dir = fs_subject_dest / "scripts"
+            if scripts_dir.exists():
+                done_file = scripts_dir / "recon-all.done"
+                if not done_file.exists():
+                    logger.warning("recon-all.done marker not found - creating it")
+                    try:
+                        done_file.touch()
+                        logger.info(f"Created completion marker: {done_file}")
+                    except Exception as e:
+                        logger.warning(f"Could not create completion marker: {e}")
+            
+            # Check if user explicitly wants to skip feature extraction
+            # (only if features from a previous MELD run already exist)
+            if not use_skip_segmentation:
+                logger.info("MELD will run feature extraction to create .sm3.mgh files")
+            
+            # Don't pass fs_derivatives_dir to apptainer since we've symlinked into meld_data_dir
+            fs_derivatives_dir = None
+    
+    # Build and launch MELD Graph command
     apptainer_cmd = build_apptainer_cmd(
         tool="meld_graph",
-        rawdata=str(dataset_rawdata),
-        derivatives=str(output_dir),
+        meld_data_dir=str(meld_data_dir),
         participant_label=participant_label,
         apptainer_img=apptainer_img,
-        fs_subjects_dir=fs_subjects_dir.parent,  # FreeSurfer subjects directory
+        fs_license=str(args.fs_license),
+        fs_subjects_dir=None,  # Not needed - using symlinks in meld_data_dir
+        harmo_code=getattr(args, 'harmo_code', None),
+        demographics=getattr(args, 'demographics', None),
+        skip_segmentation=use_skip_segmentation,
+        harmonize_only=getattr(args, 'harmonize_only', False),
         additional_options=getattr(args, 'additional_options', '')
     )
-    launch_apptainer(apptainer_cmd=apptainer_cmd)
+    
+    launch_and_check(apptainer_cmd, "MELD Graph", participant_label)
+    
+    logger.info(f"MELD Graph processing complete for {participant_label}")
+    logger.info(f"Results in: {meld_output_dir / 'predictions_reports' / f'sub-{participant_label}'}")
+
+
+def process_meld_harmonization(
+    layout: BIDSLayout,
+    participant_labels: List[str],
+    args,
+    dataset_rawdata: Path,
+    dataset_derivatives: Path,
+    dataset_code: Path,
+    apptainer_img: str
+) -> None:
+    """Compute harmonization parameters for MELD Graph.
+    
+    Harmonization requires:
+    - At least 20 subjects from the same scanner
+    - Harmonization code (e.g., H1, H2)
+    - Demographics data from participants.tsv (age, sex, group)
+    
+    Demographics file is automatically created from participants.tsv in the BIDS dataset.
+    
+    Args:
+        layout: BIDSLayout object
+        participant_labels: List of subject IDs
+        args: Parsed arguments
+        dataset_rawdata: Path to rawdata
+        dataset_derivatives: Path to derivatives
+        dataset_code: Path to code directory
+        apptainer_img: Path to container image
+    """
+    if len(participant_labels) < 20:
+        logger.warning(
+            f"Harmonization recommended with at least 20 subjects. "
+            f"You have {len(participant_labels)} subjects."
+        )
+    
+    if not getattr(args, 'harmo_code', None):
+        logger.error("--harmo-code is required for harmonization")
+        return
+    
+    meld_version = args.version or DEFAULT_MELDGRAPH_VERSION
+    
+    # Setup MELD structure
+    meld_data_dir, meld_config_dir, meld_output_dir = setup_meld_data_structure(
+        dataset_derivatives,
+        dataset_code,
+        meld_version
+    )
+    
+    # Handle demographics file
+    demographics_file = None
+    
+    # If user provided demographics file, use it
+    if getattr(args, 'demographics', None):
+        demographics_file = Path(args.demographics)
+        if not demographics_file.exists():
+            logger.error(f"Demographics file not found: {demographics_file}")
+            return
+        logger.info(f"Using provided demographics file: {demographics_file}")
+    else:
+        # Auto-generate from participants.tsv
+        participants_tsv = dataset_rawdata / "participants.tsv"
+        
+        if not participants_tsv.exists():
+            logger.error(
+                f"participants.tsv not found: {participants_tsv}\n"
+                f"Either provide a demographics CSV file with --demographics, "
+                f"or ensure your BIDS dataset has a participants.tsv file."
+            )
+            return
+        
+        logger.info("No demographics file provided. Creating from participants.tsv...")
+        
+        # Create demographics file in MELD data directory
+        auto_demographics_file = meld_data_dir / f"demographics_{args.harmo_code}.csv"
+        demographics_file = create_meld_demographics_from_participants(
+            participants_tsv=participants_tsv,
+            participant_labels=participant_labels,
+            harmo_code=args.harmo_code,
+            output_path=auto_demographics_file
+        )
+        
+        if demographics_file is None:
+            logger.error("Failed to create demographics file from participants.tsv")
+            logger.error(
+                "Please ensure participants.tsv contains required columns:\n"
+                "  - participant_id (required)\n"
+                "  - age or Age (required, numeric)\n"
+                "  - sex or Sex or gender (required, M/F or male/female)\n"
+                "  - group (optional, defaults to 'patient' if missing)"
+            )
+            return
+        
+        logger.info(f"Successfully created demographics file: {demographics_file}")
+    
+    # Validate demographics file
+    if not validate_meld_demographics(demographics_file):
+        logger.error("Demographics file validation failed")
+        return
+    
+    # Create configuration files
+    create_meld_config_json(meld_config_dir, use_bids=True)
+    create_meld_dataset_description(meld_config_dir, args.dataset)
+    
+    # Prepare input for all participants
+    for participant_label in participant_labels:
+        prepare_meld_input_symlinks(
+            meld_data_dir / "input",
+            layout,
+            participant_label
+        )
+    
+    # Copy demographics file to MELD data directory (if not already there)
+    demo_dest = meld_data_dir / demographics_file.name
+    if demographics_file != demo_dest:
+        shutil.copy(demographics_file, demo_dest)
+        logger.info(f"Copied demographics to: {demo_dest}")
+    
+    # Create subjects list file
+    subjects_list = meld_data_dir / "subjects_list.txt"
+    with open(subjects_list, 'w') as f:
+        for participant in participant_labels:
+            f.write(f"sub-{participant}\n")
+    logger.info(f"Created subjects list: {subjects_list}")
+    
+    # Handle precomputed FreeSurfer outputs
+    fs_subjects_dir = None
+    skip_segmentation = getattr(args, 'skip_segmentation', False)
+    
+    if getattr(args, 'use_precomputed_fs', False):
+        fs_version = getattr(args, 'fs_version', DEFAULT_MELD_FS_VERSION)
+        
+        # Check FreeSurfer version compatibility
+        if fs_version and float(fs_version.split('.')[0]) > 7 or (
+            float(fs_version.split('.')[0]) == 7 and float(fs_version.split('.')[1]) > 2
+        ):
+            logger.error(
+                f"MELD Graph requires FreeSurfer 7.2.0 or earlier. "
+                f"Requested version: {fs_version}"
+            )
+            return
+        
+        # Get FreeSurfer subjects directory
+        freesurfer_output_dir = dataset_derivatives / f"freesurfer_{fs_version}"
+        
+        if not freesurfer_output_dir.exists():
+            logger.error(
+                f"FreeSurfer output directory not found: {freesurfer_output_dir}\n"
+                f"Cannot use --use-precomputed-fs without existing FreeSurfer outputs."
+            )
+            return
+        
+        # Verify all participants have FreeSurfer outputs
+        missing_participants = []
+        incomplete_participants = []
+        for participant_label in participant_labels:
+            fs_subject_dir = freesurfer_output_dir / f"sub-{participant_label}"
+            if not fs_subject_dir.exists():
+                missing_participants.append(participant_label)
+            else:
+                # Check if FreeSurfer processing completed successfully
+                # Look for critical output files that indicate completion
+                required_files = [
+                    fs_subject_dir / "surf" / "lh.white",
+                    fs_subject_dir / "surf" / "rh.white",
+                    fs_subject_dir / "surf" / "lh.pial",
+                    fs_subject_dir / "surf" / "rh.pial",
+                ]
+                
+                if not all(f.exists() for f in required_files):
+                    incomplete_participants.append(participant_label)
+                    logger.warning(
+                        f"FreeSurfer outputs for sub-{participant_label} appear incomplete. "
+                        f"Missing critical surface files."
+                    )
+        
+        if missing_participants:
+            logger.error(
+                f"FreeSurfer outputs not found for participants: {missing_participants}\n"
+                f"Expected location: {freesurfer_output_dir}/sub-<ID>/"
+            )
+            return
+        
+        if incomplete_participants:
+            logger.error(
+                f"FreeSurfer outputs incomplete for participants: {incomplete_participants}\n"
+                f"These subjects may not have completed recon-all successfully.\n"
+                f"Please re-run FreeSurfer or exclude these subjects."
+            )
+            return
+        
+        fs_subjects_dir = str(freesurfer_output_dir)
+        logger.info(f"Using precomputed FreeSurfer outputs from: {fs_subjects_dir}")
+        logger.info("MELD will detect existing FreeSurfer outputs and skip recon-all")
+        logger.info("MELD will still run feature extraction to create .sm3.mgh files")
+        
+        # Create symlinks to FreeSurfer outputs in MELD structure
+        meld_fs_outputs_dir = meld_output_dir / "fs_outputs"
+        logger.info(f"Creating symlinks to FreeSurfer outputs in: {meld_fs_outputs_dir}")
+        
+        for participant_label in participant_labels:
+            fs_subject_src = freesurfer_output_dir / f"sub-{participant_label}"
+            fs_subject_dest = meld_fs_outputs_dir / f"sub-{participant_label}"
+            
+            # Remove existing symlink/directory if it exists
+            if fs_subject_dest.exists() or fs_subject_dest.is_symlink():
+                if fs_subject_dest.is_symlink():
+                    fs_subject_dest.unlink()
+                else:
+                    logger.warning(f"Removing existing directory: {fs_subject_dest}")
+                    shutil.rmtree(fs_subject_dest)
+            
+            # Create symlink
+            fs_subject_dest.symlink_to(fs_subject_src)
+            logger.info(f"  - Linked sub-{participant_label}: {fs_subject_src} -> {fs_subject_dest}")
+            
+            # Verify symlink and check for completion marker
+            if fs_subject_dest.is_symlink():
+                logger.info(f"    Symlink verified: {fs_subject_dest} -> {fs_subject_dest.resolve()}")
+                # Check if MELD completion markers exist
+                surf_dir = fs_subject_dest / "surf"
+                scripts_dir = fs_subject_dest / "scripts"
+                if surf_dir.exists():
+                    logger.info(f"    FreeSurfer surf/ directory found")
+                if scripts_dir.exists():
+                    logger.info(f"    FreeSurfer scripts/ directory found")
+                    # Check for recon-all completion markers
+                    done_file = scripts_dir / "recon-all.done"
+                    if done_file.exists():
+                        logger.info(f"    recon-all.done marker found")
+                    else:
+                        logger.warning(
+                            f"    recon-all.done marker NOT found - MELD may try to re-run FreeSurfer\n"
+                            f"    Creating completion marker to indicate FreeSurfer has finished"
+                        )
+                        # Create the marker file to tell MELD that FreeSurfer is complete
+                        # This is safe because we've verified the outputs are complete above
+                        try:
+                            done_file.touch()
+                            logger.info(f"    Created {done_file}")
+                        except Exception as e:
+                            logger.error(f"    Failed to create completion marker: {e}")
+                            logger.error(f"    MELD will likely try to re-run FreeSurfer")
+            else:
+                logger.error(f"    Failed to create symlink for sub-{participant_label}")
+        
+        # Don't pass fs_subjects_dir to apptainer since we've symlinked into meld_data_dir
+        fs_subjects_dir = None
+        # Don't set skip_segmentation=True for harmonization
+        # We want MELD to run feature extraction
+    
+    # Build command with --harmo_only flag
+    apptainer_cmd = build_apptainer_cmd(
+        tool="meld_graph",
+        meld_data_dir=str(meld_data_dir),
+        participant_label=participant_labels,  # Pass list for subjects_list.txt
+        apptainer_img=apptainer_img,
+        fs_license=str(args.fs_license),
+        fs_subjects_dir=fs_subjects_dir,
+        harmo_code=args.harmo_code,
+        demographics=str(demographics_file.name),
+        harmonize_only=True,
+        skip_segmentation=skip_segmentation,  # Only True if user explicitly set it
+        additional_options=getattr(args, 'additional_options', '')
+    )
+    
+    logger.info(f"Computing harmonization parameters for {len(participant_labels)} subjects...")
+    launch_and_check(apptainer_cmd, "MELD Harmonization", f"{len(participant_labels)} subjects")
+    
+    logger.info(f"Harmonization complete. Parameters saved in: {meld_output_dir / 'preprocessed_surf_data'}")
+
 
 def main(args=None) -> None:
     """Main entry point for ln2t_tools."""
@@ -714,6 +1137,59 @@ def main(args=None) -> None:
             
             try:
                 dataset_rawdata, dataset_derivatives, _ = setup_directories(args)
+                dataset_code = Path(DEFAULT_CODE) / f"{dataset}-code"
+                dataset_code.mkdir(parents=True, exist_ok=True)
+                # Resolve symlinks for code directory as well
+                dataset_code = dataset_code.resolve()
+                logger.debug(f"Resolved code path: {dataset_code}")
+
+                # Handle MELD-specific operations that don't process individual participants
+                if args.tool == "meld_graph":
+                    # Download weights if requested
+                    if getattr(args, 'download_weights', False):
+                        meld_version = args.version or DEFAULT_MELDGRAPH_VERSION
+                        meld_data_dir, _, _ = setup_meld_data_structure(
+                            dataset_derivatives,
+                            dataset_code,
+                            meld_version
+                        )
+                        check_apptainer_is_installed()
+                        apptainer_dir = Path(args.apptainer_dir)
+                        apptainer_img = ensure_image_exists(apptainer_dir, args.tool, meld_version)
+                        if download_meld_weights(
+                            str(apptainer_img),
+                            meld_data_dir,
+                            str(args.fs_license)
+                        ):
+                            logger.info("MELD weights downloaded successfully")
+                            successful_datasets.append(dataset)
+                            continue
+                        else:
+                            logger.error("Failed to download MELD weights")
+                            failed_datasets.append(dataset)
+                            continue
+                    
+                    # Harmonization workflow
+                    if getattr(args, 'harmonize_only', False):
+                        layout = BIDSLayout(dataset_rawdata)
+                        participant_list = args.participant_label if args.participant_label else []
+                        participant_list = check_participants_exist(layout, participant_list)
+                        
+                        check_apptainer_is_installed()
+                        apptainer_dir = Path(args.apptainer_dir)
+                        apptainer_img = ensure_image_exists(apptainer_dir, args.tool, args.version or DEFAULT_MELDGRAPH_VERSION)
+                        
+                        process_meld_harmonization(
+                            layout=layout,
+                            participant_labels=participant_list,
+                            args=args,
+                            dataset_rawdata=dataset_rawdata,
+                            dataset_derivatives=dataset_derivatives,
+                            dataset_code=dataset_code,
+                            apptainer_img=str(apptainer_img)
+                        )
+                        successful_datasets.append(dataset)
+                        continue
 
                 if args.list_missing:
                     # For list missing, use the first tool specified
@@ -800,6 +1276,7 @@ def main(args=None) -> None:
                                         args=args,
                                         dataset_rawdata=dataset_rawdata,
                                         dataset_derivatives=dataset_derivatives,
+                                        dataset_code=dataset_code,
                                         apptainer_img=apptainer_img
                                     )
                                 logger.info(f"Successfully processed participant {participant_label} with {tool}")

@@ -17,6 +17,7 @@ from bids import BIDSLayout
 from ln2t_tools.utils.defaults import (
     DEFAULT_RAWDATA,
     DEFAULT_DERIVATIVES,
+    DEFAULT_CODE,
     MAX_PARALLEL_INSTANCES,
     LOCKFILE_DIR
 )
@@ -391,12 +392,25 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             subject_id += f"_ses-{options['session']}"
         if options.get('run'):
             subject_id += f"_run-{options['run']}"
+        
+        # Convert host paths to container paths
+        # The rawdata is bound to /rawdata in the container
+        rawdata_host = Path(options['rawdata'])
+        t1w_host = Path(options['t1w'])
+        
+        # Get relative path from rawdata to t1w file
+        try:
+            t1w_relative = t1w_host.relative_to(rawdata_host)
+            t1w_container = f"/rawdata/{t1w_relative}"
+        except ValueError:
+            # If t1w is not under rawdata, use absolute path (fallback)
+            t1w_container = str(t1w_host)
             
         return (
             f"apptainer run -B {options['fs_license']}:/usr/local/freesurfer/.license "
             f"-B {options['rawdata']}:/rawdata:ro -B {options['derivatives']}:/derivatives "
             f"{options['apptainer_img']} recon-all -all -subjid {subject_id} "
-            f"-i {options['t1w']} "
+            f"-i {t1w_container} "
             f"-sd /derivatives/{options['output_label']} "
             f"{options.get('additional_options', '')}"
         )
@@ -463,36 +477,109 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"--nprocs {options.get('nprocs', 8)} "
             f"--omp-nthreads {options.get('omp_nthreads', 8)} "
             f"--fs-license-file /opt/freesurfer/license.txt "
-            f"--skip-bids-validation "
             f"{options.get('additional_options', '')}"
         )
     elif tool == "meld_graph":
-        # MELD Graph for lesion detection - requires FreeSurfer derivatives
-        fs_subjects_dir = options.get('fs_subjects_dir', '')
-        fs_bind_option = (
-            f"-B {fs_subjects_dir}:/freesurfer:ro" 
-            if fs_subjects_dir else ""
-        )
+        # MELD Graph for lesion detection with proper directory structure
+        # MELD expects:
+        # - /data for input/output structure
+        # - /license.txt for FreeSurfer license
+        # - Optional: precomputed FreeSurfer outputs in /data/output/fs_outputs
         
-        return (
-            f"apptainer run "
-            f"-B {options['rawdata']}:/data:ro "
-            f"-B {options['derivatives']}:/output "
-            f"{fs_bind_option} "
-            f"{options['apptainer_img']} "
-            f"--subject_id {options['participant_label']} "
-            f"--subjects_dir /freesurfer "
-            f"--output_dir /output "
-            f"{options.get('additional_options', '')}"
-        )
+        meld_data_dir = options.get('meld_data_dir', '')
+        fs_license = options.get('fs_license', '/opt/freesurfer/.license')
+        participant_label = options['participant_label']
+        harmo_code = options.get('harmo_code', '')
+        demographics = options.get('demographics', '')
+        skip_segmentation = options.get('skip_segmentation', False)
+        harmonize_only = options.get('harmonize_only', False)
+        
+        # Build the base command
+        cmd_parts = [
+            f"apptainer exec",
+            f"-B {meld_data_dir}:/data",
+            f"-B {fs_license}:/license.txt:ro",
+            f"--env FS_LICENSE=/license.txt"
+        ]
+        
+        # Add FreeSurfer outputs bind if using precomputed
+        fs_subjects_dir = options.get('fs_subjects_dir', '')
+        if fs_subjects_dir:
+            cmd_parts.append(f"-B {fs_subjects_dir}:/data/output/fs_outputs:ro")
+        
+        cmd_parts.append(f"{options['apptainer_img']}")
+        cmd_parts.append("/bin/bash -c 'cd /app &&")
+        
+        # Build the Python command
+        python_cmd = "python scripts/new_patient_pipeline/new_pt_pipeline.py"
+        python_args = []
+        
+        # Add participant ID
+        if isinstance(participant_label, list):
+            # Multiple subjects - create temp file list
+            python_args.append(f"-ids /data/subjects_list.txt")
+        else:
+            python_args.append(f"-id sub-{participant_label}")
+        
+        # Add harmonization code if provided
+        if harmo_code:
+            python_args.append(f"-harmo_code {harmo_code}")
+        
+        # Add demographics file if provided (for harmonization)
+        if demographics:
+            python_args.append(f"-demos /data/{Path(demographics).name}")
+        
+        # Add flags
+        # NOTE: When using precomputed FreeSurfer outputs:
+        # - MELD will automatically detect them at /data/output/fs_outputs/sub-{id}/
+        # - MELD will skip running recon-all (segmentation) automatically
+        # - MELD still needs to run feature extraction to create .sm3.mgh files
+        # - Only add --skip_feature_extraction if those features already exist
+        #   from a previous MELD run (user explicitly requested --skip-segmentation
+        #   for re-running without harmonization)
+        if skip_segmentation and not harmonize_only:
+            # Only skip feature extraction for non-harmonization runs
+            # where features were already created
+            python_args.append("--skip_feature_extraction")
+        # For harmonization: never skip feature extraction (always need fresh features)
+        
+        if harmonize_only:
+            python_args.append("--harmo_only")
+        
+        # Add any additional options
+        additional = options.get('additional_options', '')
+        if additional:
+            python_args.append(additional)
+        
+        full_cmd = f"{python_cmd} {' '.join(python_args)}'"
+        cmd_parts.append(full_cmd)
+        
+        return " ".join(cmd_parts)
     
     else:
         raise ValueError(f"Unsupported tool: {tool}")
 
 
-def launch_apptainer(apptainer_cmd):
-    print(f"Launching apptainer image {apptainer_cmd}")
-    os.system(apptainer_cmd)
+def launch_apptainer(apptainer_cmd: str) -> int:
+    """Launch Apptainer command and return exit code.
+    
+    Args:
+        apptainer_cmd: The Apptainer command to execute
+        
+    Returns:
+        Exit code (0 = success, non-zero = error)
+    """
+    logger.info("=" * 80)
+    logger.info("Launching Apptainer container")
+    logger.info("=" * 80)
+    logger.info(f"Command:\n{apptainer_cmd}")
+    logger.info("=" * 80)
+    
+    exit_code = os.system(apptainer_cmd)
+    # os.system returns the exit status in the higher byte
+    # We need to shift it to get the actual exit code
+    actual_exit_code = exit_code >> 8
+    return actual_exit_code
 
 
 def get_additional_contrasts(
@@ -530,4 +617,220 @@ def get_additional_contrasts(
         't2w': t2w[0] if t2w else None,
         'flair': flair[0] if flair else None
     }
+
+
+def setup_meld_data_structure(
+    dataset_derivatives: Path,
+    dataset_code: Path,
+    meld_version: str
+) -> tuple[Path, Path, Path]:
+    """Setup MELD Graph specific directory structure.
+    
+    MELD expects:
+    - /data/input/{subject_id}/T1/ and /data/input/{subject_id}/FLAIR/
+    - /data/output/predictions_reports/
+    - /data/output/fs_outputs/ (for FreeSurfer outputs)
+    - /data/output/preprocessed_surf_data/
+    - Config files in separate code directory
+    - Weights and data in derivatives directory
+    
+    Args:
+        dataset_derivatives: Path to dataset derivatives directory (~/derivatives/{dataset}-derivatives)
+        dataset_code: Path to dataset code directory (~/code/{dataset}-code)
+        meld_version: MELD Graph version
+        
+    Returns:
+        Tuple of (meld_data_dir, meld_config_dir, meld_output_dir)
+    """
+    # Create MELD-specific directories in derivatives folder for weights/output
+    meld_base = dataset_derivatives / f"meld_graph_{meld_version}"
+    meld_data_dir = meld_base / "data"
+    
+    # Config files stay in code directory
+    meld_config_dir = dataset_code / f"meld_graph_{meld_version}" / "config"
+    
+    # Create structure
+    meld_input_dir = meld_data_dir / "input"
+    meld_output_dir = meld_data_dir / "output"
+    
+    meld_input_dir.mkdir(parents=True, exist_ok=True)
+    meld_output_dir.mkdir(parents=True, exist_ok=True)
+    meld_config_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create output subdirectories
+    (meld_output_dir / "predictions_reports").mkdir(exist_ok=True)
+    (meld_output_dir / "fs_outputs").mkdir(exist_ok=True)
+    (meld_output_dir / "preprocessed_surf_data").mkdir(exist_ok=True)
+    
+    return meld_data_dir, meld_config_dir, meld_output_dir
+
+
+def create_meld_config_json(
+    config_dir: Path,
+    use_bids: bool = True
+) -> Path:
+    """Create MELD configuration JSON file.
+    
+    Args:
+        config_dir: Directory to save config file
+        use_bids: Whether to use BIDS format (default: True)
+        
+    Returns:
+        Path to created config file
+    """
+    config_file = config_dir / "meld_bids_config.json"
+    
+    if config_file.exists():
+        logger.info(f"MELD config already exists: {config_file}")
+        return config_file
+    
+    if use_bids:
+        config = {
+            "T1": {
+                "session": None,
+                "datatype": "anat",
+                "suffix": "T1w"
+            },
+            "FLAIR": {
+                "session": None,
+                "datatype": "anat",
+                "suffix": "FLAIR"
+            }
+        }
+    else:
+        # MELD format - simple structure
+        config = {
+            "format": "MELD"
+        }
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    logger.info(f"Created MELD config: {config_file}")
+    return config_file
+
+
+def create_meld_dataset_description(config_dir: Path, dataset_name: str) -> Path:
+    """Create dataset_description.json for MELD.
+    
+    Args:
+        config_dir: Directory to save file
+        dataset_name: Name of the dataset
+        
+    Returns:
+        Path to created file
+    """
+    desc_file = config_dir / "dataset_description.json"
+    
+    if desc_file.exists():
+        return desc_file
+    
+    description = {
+        "Name": dataset_name,
+        "BIDSVersion": "1.0.2"
+    }
+    
+    with open(desc_file, 'w') as f:
+        json.dump(description, f, indent=2)
+    
+    logger.info(f"Created dataset description: {desc_file}")
+    return desc_file
+
+
+def prepare_meld_input_symlinks(
+    meld_input_dir: Path,
+    layout: BIDSLayout,
+    participant_label: str
+) -> bool:
+    """Create symlinks in MELD input structure for a participant.
+    
+    MELD expects: input/{subject_id}/T1/T1.nii.gz and input/{subject_id}/FLAIR/FLAIR.nii.gz
+    
+    Args:
+        meld_input_dir: MELD input directory
+        layout: BIDS layout
+        participant_label: Subject ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    subject_input_dir = meld_input_dir / f"sub-{participant_label}"
+    
+    # Get T1 file
+    t1_files = layout.get(
+        subject=participant_label,
+        suffix='T1w',
+        extension='.nii.gz',
+        return_type='filename'
+    )
+    
+    if not t1_files:
+        logger.warning(f"No T1w found for {participant_label}")
+        return False
+    
+    # Create T1 directory and symlink
+    t1_dir = subject_input_dir / "T1"
+    t1_dir.mkdir(parents=True, exist_ok=True)
+    t1_link = t1_dir / "T1.nii.gz"
+    
+    if not t1_link.exists():
+        t1_link.symlink_to(t1_files[0])
+        logger.info(f"Created T1 symlink for {participant_label}")
+    
+    # Get FLAIR if available
+    flair_files = layout.get(
+        subject=participant_label,
+        suffix='FLAIR',
+        extension='.nii.gz',
+        return_type='filename'
+    )
+    
+    if flair_files:
+        flair_dir = subject_input_dir / "FLAIR"
+        flair_dir.mkdir(parents=True, exist_ok=True)
+        flair_link = flair_dir / "FLAIR.nii.gz"
+        
+        if not flair_link.exists():
+            flair_link.symlink_to(flair_files[0])
+            logger.info(f"Created FLAIR symlink for {participant_label}")
+    
+    return True
+
+
+def download_meld_weights(
+    apptainer_img: str,
+    meld_data_dir: Path,
+    fs_license: str
+) -> bool:
+    """Download MELD Graph model weights using prepare_classifier.py.
+    
+    Args:
+        apptainer_img: Path to MELD Graph apptainer image
+        meld_data_dir: Path to MELD data directory
+        fs_license: Path to FreeSurfer license
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    logger.info("Downloading MELD Graph model weights...")
+    
+    cmd = (
+        f"apptainer exec "
+        f"-B {meld_data_dir}:/data "
+        f"-B {fs_license}:/license.txt:ro "
+        f"--env FS_LICENSE=/license.txt "
+        f"{apptainer_img} "
+        f"/bin/bash -c 'cd /app && python scripts/new_patient_pipeline/prepare_classifier.py'"
+    )
+    
+    logger.info(f"Running: {cmd}")
+    exit_status = os.system(cmd)
+    exit_code = exit_status >> 8
+    
+    if exit_code == 0:
+        logger.info("Successfully downloaded MELD Graph weights")
+        return True
+    else:
+        logger.error(f"Failed to download MELD Graph weights (exit code: {exit_code})")
+        return False
 
