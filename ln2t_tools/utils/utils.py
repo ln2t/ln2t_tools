@@ -664,6 +664,10 @@ def setup_meld_data_structure(
     (meld_output_dir / "fs_outputs").mkdir(exist_ok=True)
     (meld_output_dir / "preprocessed_surf_data").mkdir(exist_ok=True)
     
+    # Note: meld_params directory will be created by download_meld_weights()
+    # when it downloads the templates (fsaverage_sym, etc.)
+    # We don't create it here to avoid the "already exists" check in get_meld_params()
+    
     return meld_data_dir, meld_config_dir, meld_output_dir
 
 
@@ -804,7 +808,7 @@ def download_meld_weights(
     meld_data_dir: Path,
     fs_license: str
 ) -> bool:
-    """Download MELD Graph model weights using prepare_classifier.py.
+    """Download MELD Graph model weights and parameters using prepare_classifier.py.
     
     Args:
         apptainer_img: Path to MELD Graph apptainer image
@@ -814,15 +818,17 @@ def download_meld_weights(
     Returns:
         True if successful, False otherwise
     """
-    logger.info("Downloading MELD Graph model weights...")
+    logger.info("Downloading MELD Graph model weights and parameters...")
     
+    # Use prepare_classifier.py with --skip-config to avoid interactive prompts
+    # This downloads: test data, meld_params, and models
     cmd = (
         f"apptainer exec "
         f"-B {meld_data_dir}:/data "
         f"-B {fs_license}:/license.txt:ro "
         f"--env FS_LICENSE=/license.txt "
         f"{apptainer_img} "
-        f"/bin/bash -c 'cd /app && python scripts/new_patient_pipeline/prepare_classifier.py'"
+        f"/bin/bash -c 'cd /app && python scripts/new_patient_pipeline/prepare_classifier.py --skip-config'"
     )
     
     logger.info(f"Running: {cmd}")
@@ -830,9 +836,18 @@ def download_meld_weights(
     exit_code = exit_status >> 8
     
     if exit_code == 0:
-        logger.info("Successfully downloaded MELD Graph weights")
+        logger.info("Successfully downloaded MELD Graph weights and parameters")
+        
+        # Verify meld_params was actually populated
+        meld_params_path = meld_data_dir / "meld_params"
+        if meld_params_path.exists() and any(meld_params_path.iterdir()):
+            logger.info(f"✓ Verified meld_params directory is populated")
+        else:
+            logger.warning(f"⚠ meld_params directory still empty after download!")
+            return False
+        
         return True
     else:
-        logger.error(f"Failed to download MELD Graph weights (exit code: {exit_code})")
+        logger.error(f"Failed to download MELD Graph weights and parameters (exit code: {exit_code})")
         return False
 
