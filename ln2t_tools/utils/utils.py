@@ -493,14 +493,37 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         demographics = options.get('demographics', '')
         skip_segmentation = options.get('skip_segmentation', False)
         harmonize_only = options.get('harmonize_only', False)
+        use_gpu = options.get('use_gpu', True)  # GPU usage control
+        gpu_memory_limit = options.get('gpu_memory_limit', 128)  # GPU memory split size in MB
         
         # Build the base command
         cmd_parts = [
             f"apptainer exec",
+        ]
+        
+        # Add GPU support with memory management if requested
+        if use_gpu:
+            cmd_parts.append(f"--nv")  # Enable NVIDIA GPU support for inference
+        
+        cmd_parts.extend([
             f"-B {meld_data_dir}:/data",
             f"-B {fs_license}:/license.txt:ro",
-            f"--env FS_LICENSE=/license.txt"
-        ]
+            f"--env FS_LICENSE=/license.txt",
+        ])
+        
+        # Add PyTorch memory management environment variables
+        if use_gpu:
+            # Help PyTorch manage GPU memory fragmentation and limit cache
+            # max_split_size_mb: reduces fragmentation by splitting allocations
+            # garbage_collection_threshold: more aggressive memory cleanup (0.6 = 60% threshold)
+            # expandable_segments: allows PyTorch to release memory back to CUDA
+            cmd_parts.extend([
+                f"--env PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:{gpu_memory_limit},garbage_collection_threshold:0.6,expandable_segments:True",
+                f"--env CUDA_LAUNCH_BLOCKING=1",  # Synchronous execution to catch errors early
+            ])
+        else:
+            # Force CPU inference by hiding GPU from CUDA
+            cmd_parts.append(f"--env CUDA_VISIBLE_DEVICES=")
         
         # Add FreeSurfer outputs bind if using precomputed
         # Note: Must be read-write because MELD needs to copy fsaverage_sym template
@@ -822,8 +845,10 @@ def download_meld_weights(
     
     # Use prepare_classifier.py with --skip-config to avoid interactive prompts
     # This downloads: test data, meld_params, and models
+    # Note: --nv flag added for consistency, though GPU not needed for download
     cmd = (
         f"apptainer exec "
+        f"--nv "
         f"-B {meld_data_dir}:/data "
         f"-B {fs_license}:/license.txt:ro "
         f"--env FS_LICENSE=/license.txt "

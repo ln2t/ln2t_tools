@@ -29,6 +29,11 @@ from ln2t_tools.utils.demographics import (
     create_meld_demographics_from_participants,
     validate_meld_demographics
 )
+from ln2t_tools.utils.slurm import (
+    submit_slurm_job,
+    validate_slurm_config,
+    monitor_job
+)
 from ln2t_tools.utils.defaults import (
     DEFAULT_RAWDATA,
     DEFAULT_DERIVATIVES,
@@ -657,6 +662,32 @@ def process_meldgraph_subject(
         dataset_code: Path to dataset code directory
         apptainer_img: Path to Apptainer image
     """
+    # Check if SLURM submission requested
+    if getattr(args, 'slurm', False):
+        logger.info(f"Submitting MELD Graph job for {participant_label} to SLURM HPC...")
+        job_id = submit_slurm_job(
+            tool="meld_graph",
+            participant_label=participant_label,
+            dataset=args.dataset,
+            args=args
+        )
+        
+        if job_id:
+            # Ask user if they want to monitor the job
+            logger.info("Job submitted successfully!")
+            logger.info("To monitor the job, you can:")
+            logger.info(f"  1. Run: ssh arovai@lyra.ulb.be 'squeue -j {job_id}'")
+            logger.info(f"  2. View output: ssh arovai@lyra.ulb.be 'tail -f ~/ln2t_slurm_jobs/{args.dataset}/meld_graph-{args.dataset}-{participant_label}_{job_id}.out'")
+            
+            # Optional: monitor job interactively
+            monitor = input("Monitor job progress now? [y/N]: ").lower().strip() == 'y'
+            if monitor:
+                monitor_job(job_id)
+        else:
+            logger.error("Failed to submit SLURM job")
+        
+        return  # Exit early - job is submitted to HPC
+    
     meld_version = args.version or DEFAULT_MELDGRAPH_VERSION
     
     # Setup MELD-specific directory structure
@@ -748,6 +779,8 @@ def process_meldgraph_subject(
         demographics=getattr(args, 'demographics', None),
         skip_segmentation=use_skip_segmentation,
         harmonize_only=getattr(args, 'harmonize_only', False),
+        use_gpu=not getattr(args, 'no_gpu', False),  # Enable GPU unless --no-gpu is set
+        gpu_memory_limit=getattr(args, 'gpu_memory_limit', 128),  # GPU memory split size
         additional_options=getattr(args, 'additional_options', '')
     )
     
@@ -980,6 +1013,8 @@ def process_meld_harmonization(
         demographics=str(demographics_file.name),
         harmonize_only=True,
         skip_segmentation=skip_segmentation,  # Only True if user explicitly set it
+        use_gpu=not getattr(args, 'no_gpu', False),  # Enable GPU unless --no-gpu is set
+        gpu_memory_limit=getattr(args, 'gpu_memory_limit', 128),  # GPU memory split size
         additional_options=getattr(args, 'additional_options', '')
     )
     

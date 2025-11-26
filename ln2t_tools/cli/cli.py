@@ -189,6 +189,71 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--no-gpu",
+        action="store_true",
+        help="Disable GPU and use CPU for MELD Graph inference (slower but uses less memory)"
+    )
+
+    parser.add_argument(
+        "--gpu-memory-limit",
+        type=int,
+        default=128,
+        help="GPU memory split size in MB for PyTorch (default: 128). Try 256, 512, or higher if getting CUDA OOM errors"
+    )
+
+    parser.add_argument(
+        "--slurm",
+        action="store_true",
+        help="Submit job to SLURM HPC cluster (lyra.ulb.be) instead of running locally"
+    )
+
+    parser.add_argument(
+        "--slurm-rawdata",
+        type=str,
+        help="Path to rawdata on HPC (required if --slurm is used)"
+    )
+
+    parser.add_argument(
+        "--slurm-derivatives",
+        type=str,
+        help="Path to derivatives on HPC (required if --slurm is used)"
+    )
+
+    parser.add_argument(
+        "--slurm-apptainer-dir",
+        type=str,
+        help="Path to apptainer images directory on HPC (required if --slurm is used)"
+    )
+
+    parser.add_argument(
+        "--slurm-partition",
+        type=str,
+        default="gpu",
+        help="SLURM partition to use (default: gpu)"
+    )
+
+    parser.add_argument(
+        "--slurm-time",
+        type=str,
+        default="24:00:00",
+        help="SLURM job time limit (default: 24:00:00)"
+    )
+
+    parser.add_argument(
+        "--slurm-mem",
+        type=str,
+        default="32G",
+        help="SLURM memory allocation (default: 32G)"
+    )
+
+    parser.add_argument(
+        "--slurm-gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to request (default: 1)"
+    )
+
+    parser.add_argument(
         "--max-instances",
         type=int,
         default=MAX_PARALLEL_INSTANCES,
