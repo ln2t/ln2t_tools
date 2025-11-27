@@ -56,8 +56,14 @@ _ln2t_tools_completion() {
             return 0
             ;;
         --dataset)
-            # Get available datasets from rawdata directory
-            local datasets=$(find -L ~/rawdata -maxdepth 1 -name "*-rawdata" -type d -printf "%f\n" | sed 's/-rawdata$//')
+            # Get available datasets from rawdata directory (or sourcedata for import tool)
+            if [[ ${words[1]} == "import" ]]; then
+                # For import tool, look in sourcedata directory
+                local datasets=$(find -L ~/sourcedata -maxdepth 1 -name "*-sourcedata" -type d -printf "%f\n" 2>/dev/null | sed 's/-sourcedata$//')
+            else
+                # For all other tools, look in rawdata directory
+                local datasets=$(find -L ~/rawdata -maxdepth 1 -name "*-rawdata" -type d -printf "%f\n")
+            fi
             COMPREPLY=( $(compgen -W "${datasets}" -- "$cur") )
             return 0
             ;;
