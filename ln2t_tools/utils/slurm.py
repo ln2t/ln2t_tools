@@ -149,7 +149,11 @@ def generate_slurm_script(
     str
         SLURM batch script content
     """
-    job_name = f"{tool}-{dataset}-{participant_label}"
+    # Use harmo code for job name when harmonizing
+    if tool == "meld_graph" and getattr(args, 'harmonize', False):
+        job_name = f"meld_harmo-{dataset}-{participant_label}"
+    else:
+        job_name = f"{tool}-{dataset}-{participant_label}"
     
     # Use $GLOBALSCRATCH if paths not provided (will be evaluated on cluster)
     if not hpc_rawdata:
@@ -191,14 +195,21 @@ def generate_slurm_script(
         
         # Build the apptainer command - the whole command will be in the script without quotes
         # so shell variables will be properly expanded
-        python_cmd = f"python scripts/new_patient_pipeline/new_pt_pipeline.py -id sub-{participant_label}"
-        
-        # Add optional arguments
-        if getattr(args, 'harmo_code', None):
-            python_cmd += f" -harmo_code {args.harmo_code}"
-        
-        if args.skip_segmentation:
-            python_cmd += " --skip_feature_extraction"
+        if getattr(args, 'harmonize', False):
+            # Use subjects_list and demographics for harmonization
+            harmo_code = getattr(args, 'harmo_code', participant_label)
+            python_cmd = (
+                f"python scripts/new_patient_pipeline/new_pt_pipeline.py "
+                f"-harmo_code {harmo_code} -ids /data/subjects_list.txt "
+                f"-demos /data/demographics_{harmo_code}.csv --harmo_only"
+            )
+        else:
+            python_cmd = f"python scripts/new_patient_pipeline/new_pt_pipeline.py -id sub-{participant_label}"
+            # Add optional arguments
+            if getattr(args, 'harmo_code', None):
+                python_cmd += f" -harmo_code {args.harmo_code}"
+            if args.skip_segmentation:
+                python_cmd += " --skip_feature_extraction"
         
         # Build complete command without quotes around paths so variables expand
         # Note: We don't mount raw data separately - it's symlinked in the MELD input directory
@@ -300,8 +311,141 @@ for subj_dir in $HPC_RAWDATA/$DATASET-rawdata/sub-*; do
         fi
     fi
 done
+
+# Link participants.tsv if present (used to build demographics)
+if [ -f "$HPC_RAWDATA/$DATASET-rawdata/participants.tsv" ]; then
+    ln -sf "$HPC_RAWDATA/$DATASET-rawdata/participants.tsv" "$MELD_DATA_DIR/input/participants.tsv"
+    echo "Linked participants.tsv"
+else
+    echo "Warning: participants.tsv not found at $HPC_RAWDATA/$DATASET-rawdata/participants.tsv"
+fi
 """
-    
+        
+        # If harmonizing, embed subjects list and generate demographics CSV on-cluster
+        if getattr(args, 'harmonize', False):
+            # Collect subject labels from either file or inline labels
+            subject_labels = []
+            try:
+                if getattr(args, 'participants_file', None):
+                    pf = Path(getattr(args, 'participants_file'))
+                    if pf.exists():
+                        for line in pf.read_text().splitlines():
+                            s = line.strip()
+                            if s:
+                                subject_labels.append(s)
+                    else:
+                        logger.warning(f"Participants file not found locally for SLURM embedding: {pf}")
+                if not subject_labels and getattr(args, 'participant_label', None):
+                    subject_labels = list(getattr(args, 'participant_label'))
+            except Exception as e:
+                logger.error(f"Error reading participants for SLURM harmonization: {e}")
+                subject_labels = []
+
+            # Normalize: ensure 'sub-' prefix when writing
+            normalized_lines = []
+            for s in subject_labels:
+                s = s.strip()
+                if not s:
+                    continue
+                if not s.startswith('sub-'):
+                    s = f"sub-{s}"
+                normalized_lines.append(s)
+
+            # Write subjects_list.txt via heredoc if we have entries
+            if normalized_lines:
+                subjects_list_content = "\n".join(normalized_lines) + "\n"
+                # Embedded Python snippet to build demographics on-cluster; keep as plain string to avoid f-string brace parsing
+                python_snippet = """
+import os, sys
+import pandas as pd
+import pathlib as p
+
+subjects = []
+with open("/data/subjects_list.txt") as f:
+    for line in f:
+        s = line.strip()
+        if s:
+            if not s.startswith("sub-"):
+                s = "sub-" + s
+            subjects.append(s)
+
+ptsv = "/data/input/participants.tsv"
+if not os.path.exists(ptsv):
+    print("participants.tsv not found:", ptsv, file=sys.stderr)
+    sys.exit(1)
+
+df = pd.read_csv(ptsv, sep="\t")
+df = df[df.get("participant_id", pd.Series(dtype=str)).isin(subjects)].copy()
+if df.empty:
+    print("No matching participants in participants.tsv", file=sys.stderr)
+    sys.exit(1)
+
+demo = pd.DataFrame()
+demo["ID"] = df["participant_id"]
+demo["Harmo code"] = os.environ.get("HARMOCODE", "H1")
+
+if "group" in df.columns:
+    grp = df["group"].astype(str).str.lower()
+    demo["Group"] = grp.where(grp.isin(["patient","control"]), "patient")
+else:
+    demo["Group"] = "patient"
+
+age_col = None
+for c in ["age","Age","age_at_preoperative","Age at preoperative"]:
+    if c in df.columns:
+        age_col = c
+        break
+if not age_col:
+    print("Age column not found in participants.tsv", file=sys.stderr)
+    sys.exit(1)
+demo["Age at preoperative"] = pd.to_numeric(df[age_col], errors="coerce")
+if demo["Age at preoperative"].isna().any():
+    print("Missing or invalid age values in participants.tsv for selected subjects", file=sys.stderr)
+    sys.exit(1)
+
+sex_col = None
+for c in ["sex","Sex","gender","Gender"]:
+    if c in df.columns:
+        sex_col = c
+        break
+if not sex_col:
+    print("Sex column not found in participants.tsv", file=sys.stderr)
+    sys.exit(1)
+sex_map = {"M":"male","m":"male","male":"male","Male":"male",
+           "F":"female","f":"female","female":"female","Female":"female"}
+demo["Sex"] = df[sex_col].map(sex_map)
+if demo["Sex"].isna().any():
+    print("Invalid sex values for selected subjects", file=sys.stderr)
+    sys.exit(1)
+
+out = "/data/demographics_" + os.environ.get("HARMOCODE","H1") + ".csv"
+demo.to_csv(out, index=False)
+print("Created demographics:", out)
+"""
+                script += f"""
+# Write subjects list for harmonization
+SUBJECTS_LIST_FILE="$MELD_DATA_DIR/subjects_list.txt"
+cat > "$SUBJECTS_LIST_FILE" << 'EOF'
+{subjects_list_content}EOF
+echo "Wrote subjects list to $SUBJECTS_LIST_FILE"
+
+# Set harmonization code for demographics
+HARMOCODE="{getattr(args, 'harmo_code', participant_label)}"
+
+# Generate demographics CSV inside the container using participants.tsv
+apptainer exec {gpu_flag} \
+    -B $MELD_DATA_DIR:/data \
+    -B {fs_license_arg}:/license.txt:ro \
+    --env FS_LICENSE=/license.txt \
+    --env HARMOCODE="$HARMOCODE" \
+    {apptainer_img} \
+    /bin/bash -c 'python - << "PY"
+{python_snippet}
+PY'
+"""
+            else:
+                logger.warning("No participants provided via --participant-label or --participants-file; harmonization job may fail.")
+
     script += f"""
 # Load required modules (adjust based on HPC configuration)
 # module load apptainer  # Uncomment if needed

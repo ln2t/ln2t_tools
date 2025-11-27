@@ -9,6 +9,7 @@ LOCKFILE_DIR = Path("/tmp/ln2t_tools_locks")
 DEFAULT_RAWDATA = Path.home() / Path("rawdata")
 DEFAULT_DERIVATIVES = Path.home() / Path("derivatives")
 DEFAULT_CODE = Path.home() / Path("code")
+DEFAULT_SOURCEDATA = Path.home() / Path("sourcedata")
 DEFAULT_APPTAINER_DIR = Path("/opt/apptainer")
 
 # Tool versions

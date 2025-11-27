@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "tool",
         nargs='?',  # Make tool optional
-        choices=["freesurfer", "fmriprep", "qsiprep", "qsirecon", "meld_graph"],
+        choices=["freesurfer", "fmriprep", "qsiprep", "qsirecon", "meld_graph", "import"],
         help="Neuroimaging tool to use (optional if using config file)"
     )
 
@@ -40,6 +40,12 @@ def parse_args() -> argparse.Namespace:
         "--participant-label",
         nargs='+',
         help="One or more participant labels (without 'sub-' prefix)"
+    )
+
+    parser.add_argument(
+        "--participants-file",
+        type=str,
+        help="Path to a text file with one subject ID per line (with or without 'sub-' prefix), used for harmonization runs"
     )
 
     parser.add_argument(
@@ -158,6 +164,12 @@ def parse_args() -> argparse.Namespace:
         "--download-weights",
         action="store_true",
         help="Download MELD Graph model weights (run once before first use)"
+    )
+
+    parser.add_argument(
+        "--harmonize",
+        action="store_true",
+        help="Compute harmonization parameters for the provided cohort (use with --participant-label or --participants-file)"
     )
 
     parser.add_argument(
@@ -284,6 +296,42 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=MAX_PARALLEL_INSTANCES,
         help=f"Maximum number of parallel instances (default: {MAX_PARALLEL_INSTANCES})"
+    )
+
+    # Import tool specific arguments
+    parser.add_argument(
+        "--datatype",
+        choices=["dicom", "physio", "mrs", "all"],
+        default="all",
+        help="Type of source data to import (default: all)"
+    )
+
+    parser.add_argument(
+        "--session",
+        help="Session label (without 'ses-' prefix) for multi-session datasets"
+    )
+
+    parser.add_argument(
+        "--ds-initials",
+        help="Dataset initials prefix for source data (e.g., 'CB', 'HP')"
+    )
+
+    parser.add_argument(
+        "--compress-source",
+        action="store_true",
+        help="Compress source data after successful import (creates .tar.gz archives)"
+    )
+
+    parser.add_argument(
+        "--skip-deface",
+        action="store_true",
+        help="Skip defacing step for anatomical images (import tool only)"
+    )
+
+    parser.add_argument(
+        "--import-env",
+        type=Path,
+        help="Path to Python virtual environment for import tools (default: ~/venvs/general_purpose_env)"
     )
 
     return parser.parse_args()

@@ -4,6 +4,8 @@ import shutil
 import pandas as pd
 from typing import Optional, List, Dict
 from pathlib import Path
+import re
+from datetime import datetime
 from bids import BIDSLayout
 
 from ln2t_tools.cli.cli import parse_args, setup_terminal_colors
@@ -45,6 +47,7 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_MELDGRAPH_VERSION,
     DEFAULT_MELD_FS_VERSION
 )
+from ln2t_tools.import_data import import_dicom, import_mrs, import_physio
 
 # Setup logging
 logging.basicConfig(
@@ -178,6 +181,161 @@ def get_additional_contrasts(
         't2w': t2w[0] if t2w else None,
         'flair': flair[0] if flair else None
     }
+
+
+def handle_import(args):
+    """Handle import of source data to BIDS format.
+    
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments
+    """
+    import subprocess
+    
+    # Validate required arguments
+    if not args.dataset:
+        logger.error("--dataset is required for import")
+        return
+    
+    if not args.participant_label:
+        logger.error("--participant-label is required for import (one or more participant IDs)")
+        return
+    
+    # Setup directories
+    dataset = args.dataset
+    sourcedata_dir = Path.home() / "sourcedata" / f"{dataset}-sourcedata"
+    rawdata_dir = Path(DEFAULT_RAWDATA) / f"{dataset}-rawdata"
+    
+    # Resolve symlinks
+    sourcedata_dir = sourcedata_dir.resolve()
+    rawdata_dir = rawdata_dir.resolve()
+    
+    # Check sourcedata exists
+    if not sourcedata_dir.exists():
+        logger.error(f"Sourcedata directory not found: {sourcedata_dir}")
+        logger.info(f"Expected location: ~/sourcedata/{dataset}-sourcedata")
+        return
+    
+    logger.info(f"Importing data for dataset: {dataset}")
+    logger.info(f"Source: {sourcedata_dir}")
+    logger.info(f"Target: {rawdata_dir}")
+    logger.info(f"Participants: {', '.join(args.participant_label)}")
+    if getattr(args, 'session', None):
+        logger.info(f"Session: {args.session}")
+    
+    # Get virtual environment path
+    venv_path = getattr(args, 'import_env', None)
+    if venv_path:
+        venv_path = Path(venv_path).resolve()
+    
+    # Determine which datatypes to import
+    datatype_arg = getattr(args, 'datatype', 'all')
+    datatypes = [datatype_arg] if datatype_arg != 'all' else ['dicom', 'mrs', 'physio']
+    
+    import_success = {'dicom': False, 'mrs': False, 'physio': False}
+    
+    for datatype in datatypes:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Processing {datatype.upper()} data")
+        logger.info(f"{'='*60}")
+        
+        if datatype == 'dicom':
+            # Check if dicom directory exists
+            if not (sourcedata_dir / "dicom").exists():
+                logger.info(f"No dicom directory found in {sourcedata_dir}, skipping")
+                continue
+            
+            import_success['dicom'] = import_dicom(
+                dataset=dataset,
+                participant_labels=args.participant_label,
+                sourcedata_dir=sourcedata_dir,
+                rawdata_dir=rawdata_dir,
+                ds_initials=getattr(args, 'ds_initials', None),
+                session=getattr(args, 'session', None),
+                compress_source=getattr(args, 'compress_source', False),
+                skip_deface=getattr(args, 'skip_deface', False),
+                venv_path=venv_path
+            )
+        
+        elif datatype == 'mrs':
+            # Check if mrs or pfiles directory exists
+            if not (sourcedata_dir / "mrs").exists() and not (sourcedata_dir / "pfiles").exists():
+                logger.info(f"No mrs/pfiles directory found in {sourcedata_dir}, skipping")
+                continue
+            
+            import_success['mrs'] = import_mrs(
+                dataset=dataset,
+                participant_labels=args.participant_label,
+                sourcedata_dir=sourcedata_dir,
+                rawdata_dir=rawdata_dir,
+                ds_initials=getattr(args, 'ds_initials', None),
+                session=getattr(args, 'session', None),
+                compress_source=getattr(args, 'compress_source', False),
+                venv_path=venv_path
+            )
+        
+        elif datatype == 'physio':
+            # Check if physio directory exists
+            if not (sourcedata_dir / "physio").exists():
+                logger.info(f"No physio directory found in {sourcedata_dir}, skipping")
+                continue
+            
+            import_success['physio'] = import_physio(
+                dataset=dataset,
+                participant_labels=args.participant_label,
+                sourcedata_dir=sourcedata_dir,
+                rawdata_dir=rawdata_dir,
+                ds_initials=getattr(args, 'ds_initials', None),
+                session=getattr(args, 'session', None),
+                compress_source=getattr(args, 'compress_source', False),
+                venv_path=venv_path
+            )
+    
+    # Final summary
+    logger.info(f"\n{'='*60}")
+    logger.info("IMPORT SUMMARY")
+    logger.info(f"{'='*60}")
+    logger.info(f"Dataset: {dataset}")
+    logger.info(f"Participants: {len(args.participant_label)}")
+    
+    for dtype, success in import_success.items():
+        if dtype in datatypes or datatype_arg == 'all':
+            status = "✓ SUCCESS" if success else "✗ FAILED/SKIPPED"
+            logger.info(f"  {dtype.upper()}: {status}")
+    
+    logger.info(f"{'='*60}\n")
+    
+    # Show tree of imported data
+    logger.info("Validating imported data structure...")
+    for participant in args.participant_label:
+        participant_id = participant.replace('sub-', '')
+        subj_dir = rawdata_dir / f"sub-{participant_id}"
+        if subj_dir.exists():
+            # Try to run tree command
+            try:
+                result = subprocess.run(
+                    ['tree', str(subj_dir)],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    logger.info(f"\n{result.stdout}")
+                else:
+                    # Fallback: list directories
+                    logger.info(f"\nStructure for sub-{participant_id}:")
+                    for item in sorted(subj_dir.rglob("*")):
+                        if item.is_file():
+                            logger.info(f"  {item.relative_to(rawdata_dir)}")
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                # tree command not available, just list top-level
+                logger.info(f"\nsub-{participant_id}:")
+                for item in sorted(subj_dir.iterdir()):
+                    logger.info(f"  {item.name}")
+        else:
+            logger.warning(f"Subject directory not created: {subj_dir}")
+
 
 def setup_directories(args) -> tuple[Path, Path, Path]:
     """Setup and validate directory structure for processing.
@@ -1045,6 +1203,11 @@ def main(args=None) -> None:
             instance_manager.list_active_instances()
             return
 
+        # Handle import tool separately (doesn't follow the same pattern as processing tools)
+        if hasattr(args, 'tool') and args.tool == 'import':
+            handle_import(args)
+            return
+
         # Read processing configuration
         config_path = Path(DEFAULT_RAWDATA) / "processing_config.tsv"
         config_df = read_processing_config(config_path)
@@ -1164,27 +1327,133 @@ def main(args=None) -> None:
                             failed_datasets.append(dataset)
                             continue
                     
-                    # Harmonization workflow
-                    if getattr(args, 'harmonize_only', False):
+                    # Harmonization workflow (explicit --harmonize or legacy --harmonize-only)
+                    if getattr(args, 'harmonize', False) or getattr(args, 'harmonize_only', False):
+                        # Resolve participant list (from file or labels)
+                        participant_list: List[str] = []
+                        if getattr(args, 'participants_file', None):
+                            pf = Path(args.participants_file)
+                            if not pf.exists():
+                                logger.error(f"Participants file not found: {pf}")
+                                failed_datasets.append(dataset)
+                                continue
+                            with open(pf) as f:
+                                for line in f:
+                                    s = line.strip()
+                                    if not s:
+                                        continue
+                                    s = s.replace('sub-','')
+                                    participant_list.append(s)
+                        else:
+                            participant_list = args.participant_label if args.participant_label else []
+                        
                         layout = BIDSLayout(dataset_rawdata)
-                        participant_list = args.participant_label if args.participant_label else []
                         participant_list = check_participants_exist(layout, participant_list)
+                        if not participant_list:
+                            logger.error("No valid participants provided for harmonization")
+                            failed_datasets.append(dataset)
+                            continue
+                        
+                        # Determine or set harmo code
+                        if not getattr(args, 'harmo_code', None):
+                            preproc_dir = dataset_derivatives / f"meld_graph_{args.version or DEFAULT_MELDGRAPH_VERSION}" / "data" / "output" / "preprocessed_surf_data"
+                            next_idx = 1
+                            if preproc_dir.exists():
+                                for p in preproc_dir.rglob("MELD_H*_combat_parameters.hdf5"):
+                                    m = re.search(r"MELD_H(\d+)_combat_parameters\\.hdf5", p.name)
+                                    if m:
+                                        next_idx = max(next_idx, int(m.group(1)) + 1)
+                            args.harmo_code = f"H{next_idx}"
+                            logger.info(f"Auto-assigned harmonization code: {args.harmo_code}")
                         
                         check_apptainer_is_installed()
                         apptainer_dir = Path(args.apptainer_dir)
-                        apptainer_img = ensure_image_exists(apptainer_dir, args.tool, args.version or DEFAULT_MELDGRAPH_VERSION)
+                        apptainer_img = ensure_image_exists(apptainer_dir, "meld_graph", args.version or DEFAULT_MELDGRAPH_VERSION)
                         
-                        process_meld_harmonization(
-                            layout=layout,
-                            participant_labels=participant_list,
-                            args=args,
-                            dataset_rawdata=dataset_rawdata,
-                            dataset_derivatives=dataset_derivatives,
-                            dataset_code=dataset_code,
-                            apptainer_img=str(apptainer_img)
+                        # Prepare inputs: config, subjects list, demographics
+                        meld_data_dir, meld_config_dir, meld_output_dir = setup_meld_data_structure(
+                            dataset_derivatives,
+                            dataset_code,
+                            args.version or DEFAULT_MELDGRAPH_VERSION
                         )
-                        successful_datasets.append(dataset)
-                        continue
+                        create_meld_config_json(meld_config_dir, use_bids=True)
+                        create_meld_dataset_description(meld_config_dir, args.dataset)
+                        
+                        # Subjects list in MELD data root
+                        subjects_list_path = meld_data_dir / "subjects_list.txt"
+                        with open(subjects_list_path, 'w') as f:
+                            for pid in participant_list:
+                                f.write(f"sub-{pid}\n")
+                        logger.info(f"Subjects list written: {subjects_list_path}")
+                        
+                        # Demographics CSV
+                        if getattr(args, 'demographics', None):
+                            demographics_path = Path(args.demographics)
+                            if not demographics_path.exists():
+                                logger.error(f"Demographics file not found: {demographics_path}")
+                                failed_datasets.append(dataset)
+                                continue
+                            dest_demo = meld_data_dir / demographics_path.name
+                            if demographics_path != dest_demo:
+                                shutil.copy(demographics_path, dest_demo)
+                            demographics_path = dest_demo
+                        else:
+                            participants_tsv = dataset_rawdata / "participants.tsv"
+                            if not participants_tsv.exists():
+                                logger.error(f"participants.tsv not found: {participants_tsv}")
+                                failed_datasets.append(dataset)
+                                continue
+                            demographics_path = create_meld_demographics_from_participants(
+                                participants_tsv=participants_tsv,
+                                participant_labels=participant_list,
+                                harmo_code=args.harmo_code,
+                                output_path=meld_data_dir / f"demographics_{args.harmo_code}.csv"
+                            )
+                            if demographics_path is None:
+                                logger.error("Failed to create demographics CSV for harmonization")
+                                failed_datasets.append(dataset)
+                                continue
+                        
+                        # Persist harmonization metadata
+                        harmo_dir = dataset_derivatives / f"meld_graph_{args.version or DEFAULT_MELDGRAPH_VERSION}" / "harmonization"
+                        harmo_dir.mkdir(parents=True, exist_ok=True)
+                        meta_path = harmo_dir / f"harmonization_{args.harmo_code}.tsv"
+                        with open(meta_path, 'w') as mf:
+                            mf.write("ID\tHarmoCode\tTimestamp\n")
+                            ts = datetime.now().isoformat(timespec='seconds')
+                            for pid in participant_list:
+                                mf.write(f"sub-{pid}\t{args.harmo_code}\t{ts}\n")
+                        logger.info(f"Saved harmonization record: {meta_path}")
+                        
+                        if getattr(args, 'slurm', False):
+                            # Submit SLURM job using meld_graph in harmonize mode
+                            job_id = submit_slurm_job(
+                                tool="meld_graph",
+                                participant_label=args.harmo_code,  # use code for job name label
+                                dataset=dataset,
+                                args=args
+                            )
+                            if job_id:
+                                logger.info(f"Submitted harmonization job {job_id} for {len(participant_list)} subjects")
+                                monitor_job(job_id, args.slurm_user, args.slurm_host)
+                                successful_datasets.append(dataset)
+                            else:
+                                logger.error("Failed to submit harmonization job to SLURM")
+                                failed_datasets.append(dataset)
+                            continue
+                        else:
+                            # Run locally via container
+                            process_meld_harmonization(
+                                layout=layout,
+                                participant_labels=participant_list,
+                                args=args,
+                                dataset_rawdata=dataset_rawdata,
+                                dataset_derivatives=dataset_derivatives,
+                                dataset_code=dataset_code,
+                                apptainer_img=str(apptainer_img)
+                            )
+                            successful_datasets.append(dataset)
+                            continue
 
                 if args.list_missing:
                     # For list missing, use the first tool specified
