@@ -4,23 +4,153 @@ Useful tools for the LN2T
 ## Overview
 
 ln2t_tools is a neuroimaging pipeline manager that supports multiple processing tools:
-- **FreeSurfer**: Cortical reconstruction and surface-based analysis
-- **fMRIPrep**: Functional MRI preprocessing
-- **QSIPrep**: Diffusion MRI preprocessing
-- **QSIRecon**: Diffusion MRI reconstruction (requires QSIPrep)
-- **MELD Graph**: Lesion detection (requires FreeSurfer)
+- **FreeSurfer**: Cortical reconstruction and surface-based analysis ([official docs](https://surfer.nmr.mgh.harvard.edu/))
+- **fMRIPrep**: Functional MRI preprocessing ([official docs](https://fmriprep.org/))
+- **QSIPrep**: Diffusion MRI preprocessing ([official docs](https://qsiprep.readthedocs.io/))
+- **QSIRecon**: Diffusion MRI reconstruction ([official docs](https://qsiprep.readthedocs.io/))
+- **MELD Graph**: Lesion detection ([official docs](https://meld-graph.readthedocs.io/))
 
 ## Table of Contents
-1. [Quick Start](#quick-start)
-2. [Pipeline Usage Examples](#pipeline-usage-examples)
+1. [Data Organization](#data-organization)
+2. [Setup Requirements](#setup-requirements)
+3. [Quick Start](#quick-start)
+4. [Pipeline Usage Examples](#pipeline-usage-examples)
    - [FreeSurfer](#freesurfer)
    - [fMRIPrep](#fmriprep)
    - [QSIPrep](#qsiprep)
    - [QSIRecon](#qsirecon)
    - [MELD Graph](#meld-graph)
-3. [Configuration-Based Processing](#configuration-based-processing)
-4. [Instance Management](#instance-management)
-5. [Command-line Completion](#command-line-completion)
+5. [Configuration-Based Processing](#configuration-based-processing)
+6. [Instance Management](#instance-management)
+7. [Command-line Completion](#command-line-completion)
+
+---
+
+## Data Organization
+
+ln2t_tools follows the [BIDS (Brain Imaging Data Structure) specification](https://bids-specification.readthedocs.io/) for organizing neuroimaging data.
+
+### Dataset Naming Convention
+
+Datasets follow a consistent naming pattern:
+- **Source data**: `{dataset}-sourcedata` (e.g., `myproject-sourcedata`)
+- **Raw BIDS data**: `{dataset}-rawdata` (e.g., `myproject-rawdata`)
+- **Derivatives**: `{dataset}-derivatives` (e.g., `myproject-derivatives`)
+- **Code**: `{dataset}-code` (e.g., `myproject-code`)
+
+### Directory Structure
+
+All datasets are organized under your home directory:
+
+```
+~/
+├── sourcedata/
+│   └── {dataset}-sourcedata/
+│       ├── dicom/                          # DICOM files from scanner
+│       ├── physio/                         # Physiological recordings (GE scanner)
+│       ├── mrs/                            # Magnetic Resonance Spectroscopy data
+│       └── configs/                        # Configuration files
+│           ├── dcm2bids.json              # DICOM to BIDS conversion config
+│           ├── spec2bids.json             # MRS to BIDS conversion config
+│           └── physio.json                # Physiological data processing config
+│
+├── rawdata/
+│   └── {dataset}-rawdata/                  # BIDS-formatted data
+│       ├── dataset_description.json
+│       ├── participants.tsv
+│       ├── sub-{id}/
+│       │   ├── anat/
+│       │   │   ├── sub-{id}_T1w.nii.gz
+│       │   │   ├── sub-{id}_T2w.nii.gz
+│       │   │   └── sub-{id}_FLAIR.nii.gz
+│       │   ├── func/
+│       │   │   ├── sub-{id}_task-{name}_bold.nii.gz
+│       │   │   └── sub-{id}_task-{name}_bold.json
+│       │   ├── dwi/
+│       │   │   ├── sub-{id}_dwi.nii.gz
+│       │   │   ├── sub-{id}_dwi.bval
+│       │   │   └── sub-{id}_dwi.bvec
+│       │   ├── mrs/
+│       │   │   ├── sub-{id}_svs.nii.gz
+│       │   │   └── sub-{id}_svs.json
+│       │   └── func/ (physiological recordings)
+│       │       ├── sub-{id}_task-{name}_recording-cardiac_physio.tsv.gz
+│       │       ├── sub-{id}_task-{name}_recording-cardiac_physio.json
+│       │       ├── sub-{id}_task-{name}_recording-respiratory_physio.tsv.gz
+│       │       └── sub-{id}_task-{name}_recording-respiratory_physio.json
+│       └── processing_config.tsv          # Optional pipeline configuration
+│
+├── derivatives/
+│   └── {dataset}-derivatives/
+│       ├── freesurfer_{version}/          # FreeSurfer outputs
+│       ├── fmriprep_{version}/            # fMRIPrep outputs
+│       ├── qsiprep_{version}/             # QSIPrep outputs
+│       ├── qsirecon_{version}/            # QSIRecon outputs
+│       └── meld_graph_{version}/          # MELD Graph outputs
+│
+└── code/
+    └── {dataset}-code/
+        └── meld_graph_{version}/
+            └── config/                     # MELD configuration files
+                ├── meld_bids_config.json
+                └── dataset_description.json
+```
+
+**Key Points**:
+- **sourcedata**: Original, unmodified data from the scanner
+- **rawdata**: BIDS-formatted data, ready for processing
+- **derivatives**: Processed outputs from analysis pipelines
+- **code**: Analysis code and pipeline-specific configurations
+
+For more details on BIDS structure, see the [BIDS Specification](https://bids-specification.readthedocs.io/).
+
+---
+
+## Setup Requirements
+
+### Apptainer (formerly Singularity)
+
+ln2t_tools uses [Apptainer](https://apptainer.org/) containers to run neuroimaging pipelines. This ensures reproducibility and eliminates dependency conflicts.
+
+**Installation**:
+- Apptainer must be installed system-wide
+- Requires sudo/root access for installation
+- Container images are stored in `/opt/apptainer/` by default
+
+**Permissions**:
+The `/opt/apptainer/` directory requires write access for pulling and caching container images:
+```bash
+# Create directory with proper permissions (requires sudo)
+sudo mkdir -p /opt/apptainer
+sudo chown -R $USER:$USER /opt/apptainer
+sudo chmod -R 755 /opt/apptainer
+```
+
+Alternatively, you can use a custom directory:
+```bash
+ln2t_tools freesurfer --dataset mydataset --apptainer-dir /path/to/custom/dir
+```
+
+### FreeSurfer License
+
+FreeSurfer requires a valid license file (free academic license available at [FreeSurfer Registration](https://surfer.nmr.mgh.harvard.edu/registration.html)).
+
+**Default License Location**:
+```bash
+~/licenses/license.txt
+```
+
+To use a custom license location:
+```bash
+ln2t_tools freesurfer --dataset mydataset --fs-license /path/to/license.txt
+```
+
+### Internet Connection
+
+An active internet connection is required for:
+- Downloading container images (first run only)
+- Downloading MELD Graph model weights (one-time setup)
+- Accessing template spaces and atlases
 
 ---
 
@@ -94,8 +224,6 @@ fMRIPrep performs robust preprocessing of functional MRI data.
 - **Output directory**: `~/derivatives/{dataset}-derivatives/fmriprep_25.1.4/`
 - **Container**: `nipreps/fmriprep:25.1.4`
 - **Output spaces**: `MNI152NLin2009cAsym:res-2`
-- **Number of processes**: `8`
-- **OpenMP threads**: `8`
 
 #### Basic Usage
 
@@ -120,15 +248,10 @@ ln2t_tools fmriprep --dataset mydataset --participant-label 01 --fs-no-reconall
 ln2t_tools fmriprep --dataset mydataset --participant-label 01 \
   --output-spaces MNI152NLin2009cAsym:res-1 fsaverage:den-10k
 
-# Adjust computational resources
-ln2t_tools fmriprep --dataset mydataset --participant-label 01 \
-  --nprocs 16 --omp-nthreads 16
-
 # Combine multiple options
 ln2t_tools fmriprep --dataset mydataset --participant-label 01 \
   --fs-no-reconall \
-  --output-spaces MNI152NLin2009cAsym:res-2 MNI152NLin6Asym:res-2 \
-  --nprocs 12 --omp-nthreads 12
+  --output-spaces MNI152NLin2009cAsym:res-2 MNI152NLin6Asym:res-2
 ```
 
 **Notes**:
@@ -146,8 +269,6 @@ QSIPrep performs preprocessing of diffusion MRI data.
 - **Output directory**: `~/derivatives/{dataset}-derivatives/qsiprep_1.0.1/`
 - **Container**: `pennlinc/qsiprep:1.0.1`
 - **Denoise method**: `dwidenoise`
-- **Number of processes**: `8`
-- **OpenMP threads**: `8`
 
 #### Basic Usage
 
@@ -181,16 +302,11 @@ ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
   --output-resolution 1.25 --anat-only
 
-# Adjust computational resources
-ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --output-resolution 1.25 --nprocs 16 --omp-nthreads 16
-
 # Full example with multiple options
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
   --version 1.0.1 \
   --output-resolution 1.5 \
-  --denoise-method dwidenoise \
-  --nprocs 12 --omp-nthreads 12
+  --denoise-method dwidenoise
 ```
 
 **Required Options**:
@@ -212,8 +328,6 @@ QSIRecon performs reconstruction and tractography on QSIPrep preprocessed data.
 - **Container**: `pennlinc/qsirecon:1.1.1`
 - **QSIPrep version**: `1.0.1` (default input)
 - **Reconstruction spec**: `mrtrix_multishell_msmt_ACT-hsvs`
-- **Number of processes**: `8`
-- **OpenMP threads**: `8`
 
 #### Basic Usage
 
@@ -247,16 +361,11 @@ ln2t_tools qsirecon --dataset mydataset --participant-label 01 \
 ln2t_tools qsirecon --dataset mydataset --participant-label 01 \
   --recon-spec dsi_studio_gqi
 
-# Adjust computational resources
-ln2t_tools qsirecon --dataset mydataset --participant-label 01 \
-  --nprocs 16 --omp-nthreads 16
-
 # Full example combining options
 ln2t_tools qsirecon --dataset mydataset --participant-label 01 \
   --qsiprep-version 1.0.1 \
   --version 1.1.1 \
-  --recon-spec mrtrix_multishell_msmt_ACT-hsvs \
-  --nprocs 12 --omp-nthreads 12
+  --recon-spec mrtrix_multishell_msmt_ACT-hsvs
 ```
 
 **Prerequisites**:
@@ -494,11 +603,53 @@ Results are saved in:
     └── {id}.hdf5                    # Extracted surface features
 ```
 
-**Interpreting Results**:
-- High probability clusters (red/yellow in reports) indicate potential FCD locations
-- Review both prediction maps and saliency maps
-- Cross-reference with clinical information
-- **Remember**: This is a research tool, not a diagnostic device
+---
+
+#### Running on HPC Cluster with SLURM
+
+MELD Graph can be submitted to a SLURM HPC cluster for processing:
+
+```bash
+# Basic SLURM submission
+ln2t_tools meld_graph --dataset mydataset \
+  --participant-label 01 \
+  --slurm \
+  --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer/images/on/cluster
+
+# SLURM with custom resources
+ln2t_tools meld_graph --dataset mydataset \
+  --participant-label 01 02 03 \
+  --slurm \
+  --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer/images \
+  --slurm-gpus 1 \
+  --slurm-mem 32G \
+  --slurm-time 4:00:00 \
+  --slurm-partition gpu
+
+# SLURM with harmonization
+ln2t_tools meld_graph --dataset mydataset \
+  --participant-label 01 \
+  --harmo-code H1 \
+  --slurm \
+  --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer/images
+```
+
+**SLURM Options**:
+- `--slurm`: Enable SLURM submission
+- `--slurm-user`: Your username on the HPC cluster (required)
+- `--slurm-host`: HPC hostname (default: lyra.ulb.be)
+- `--slurm-apptainer-dir`: Path to apptainer images on the cluster (required)
+- `--slurm-rawdata`: Path to rawdata on cluster (default: `$GLOBALSCRATCH/rawdata`)
+- `--slurm-derivatives`: Path to derivatives on cluster (default: `$GLOBALSCRATCH/derivatives`)
+- `--slurm-fs-license`: Path to FreeSurfer license on cluster (default: `$HOME/licenses/license.txt`)
+- `--slurm-fs-version`: FreeSurfer version on cluster (default: 7.2.0)
+- `--slurm-partition`: SLURM partition (default: None - cluster decides)
+- `--slurm-time`: Job time limit (default: 1:00:00)
+- `--slurm-mem`: Memory allocation (default: 32G)
+- `--slurm-gpus`: Number of GPUs (default: 1)
 
 ---
 
@@ -523,6 +674,14 @@ FreeSurfer:
   --fs-version VERSION             FreeSurfer version (default: 7.2.0, max: 7.2.0)
   --use-precomputed-fs             Use existing FreeSurfer outputs (skips recon-all, runs feature extraction)
   --skip-segmentation              Skip MELD feature extraction (only if .sm3.mgh files already exist)
+
+SLURM Options:
+  --slurm                          Submit to SLURM cluster
+  --slurm-user USER                HPC username (required with --slurm)
+  --slurm-apptainer-dir PATH       Apptainer images directory on cluster (required with --slurm)
+  --slurm-gpus N                   Number of GPUs (default: 1)
+  --slurm-mem SIZE                 Memory allocation (default: 32G)
+  --slurm-time TIME                Time limit (default: 1:00:00)
 
 Version:
   --version VERSION                MELD Graph version (default: v2.2.3)
@@ -555,51 +714,6 @@ Note: MELD Graph requires FreeSurfer 7.2.0 or earlier (current default: 7.2.0).
 Harmonization recommended with at least 20 subjects. You have 15 subjects.
 ```
 → Add more subjects for reliable harmonization or proceed without harmonization
-
----
-
-#### Troubleshooting
-
-**Q: Can I use FreeSurfer 7.3 or 7.4?**  
-A: No, MELD Graph only works with FreeSurfer 7.2.0 or earlier due to surface format changes.
-
-**Q: Is harmonization mandatory?**  
-A: No, but highly recommended. Without harmonization, expect more false positives.
-
-**Q: How many subjects do I need for harmonization?**  
-A: Minimum 20, more is better. Must be from the same scanner/protocol.
-
-**Q: Where are the model weights stored?**  
-A: In `~/derivatives/{dataset}-derivatives/meld_graph_{version}/data/` (downloaded automatically with `--download-weights`)
-
-**Q: Can I reuse harmonization parameters?**  
-A: Yes! Once computed for a scanner (e.g., H1), use `--harmo-code H1` for all future subjects from that scanner.
-
-**Q: MELD is taking a long time**  
-A: FreeSurfer recon-all takes 6-12 hours per subject. Use `--use-precomputed-fs` if you already have FreeSurfer outputs.
-
-**Q: What if I don't have a participants.tsv file?**  
-A: Create one in your BIDS rawdata directory with the required columns (participant_id, age, sex), or provide a demographics CSV file directly with `--demographics`.
-
-**Q: What if my participants.tsv is missing age or sex information?**  
-A: ln2t_tools will show an error message indicating which columns are missing. You can either update your participants.tsv file or create a custom demographics CSV file and use `--demographics`.
-
-**Q: Can I use a custom demographics file instead of participants.tsv?**  
-A: Yes! Use `--demographics /path/to/your/demographics.csv` to provide your own file. It should have columns: ID, Harmo code, Group, Age at preoperative, Sex.
-
-**Q: Understanding MELD's workflow - what gets computed when?**  
-A: MELD has 3 steps:
-1. **FreeSurfer Segmentation** (6-12 hours): Creates surfaces and parcellations. Skip with `--use-precomputed-fs` if you already ran FreeSurfer.
-2. **Feature Extraction** (15-30 min): Creates `.on_lh.thickness.sm3.mgh` and similar smoothed feature files from FreeSurfer outputs. MELD needs these for prediction.
-3. **Prediction/Harmonization** (5-10 min): Uses extracted features for lesion detection.
-
-When using `--use-precomputed-fs`: MELD skips step 1 (finds existing FreeSurfer outputs) but still runs steps 2 and 3.
-
-**Q: What does `--skip-segmentation` actually do?**  
-A: Despite the name, it tells MELD to skip **feature extraction** (step 2), not FreeSurfer segmentation. Use this ONLY when `.sm3.mgh` files already exist from a previous MELD run. Don't use it with `--use-precomputed-fs` unless you've already run MELD once on that subject.
-
-**Q: I get errors about missing `.sm3.mgh` files**  
-A: Don't use `--skip-segmentation` with `--use-precomputed-fs`. MELD needs to create these feature files from your FreeSurfer outputs first.
 
 ---
 
@@ -953,10 +1067,10 @@ ln2t_tools freesurfer --dataset mydataset --participant-label <TAB>
 
 # Tab shows tool-specific options
 ln2t_tools qsiprep --<TAB>
-# → --output-resolution --denoise-method --dwi-only --anat-only --nprocs --omp-nthreads
+# → --output-resolution --denoise-method --dwi-only --anat-only
 
 ln2t_tools qsirecon --<TAB>
-# → --qsiprep-version --recon-spec --nprocs --omp-nthreads
+# → --qsiprep-version --recon-spec
 ```
 
 ---
@@ -1016,47 +1130,6 @@ ln2t_tools --max-instances 3 --dataset mydataset
 
 ---
 
-## Directory Structure
-
-ln2t_tools expects and creates the following structure:
-
-```
-~/rawdata/
-  ├── processing_config.tsv          # Configuration file
-  ├── dataset1-rawdata/              # BIDS raw data
-  │   ├── sub-01/
-  │   ├── sub-02/
-  │   └── ...
-  └── dataset2-rawdata/
-      └── ...
-
-~/derivatives/
-  ├── dataset1-derivatives/
-  │   ├── freesurfer_7.3.2/         # FreeSurfer outputs
-  │   ├── fmriprep_25.1.4/          # fMRIPrep outputs
-  │   ├── qsiprep_1.0.1/            # QSIPrep outputs
-  │   ├── qsirecon_1.1.1/           # QSIRecon outputs
-  │   └── meld_graph_v2.2.3/        # MELD Graph outputs
-  └── dataset2-derivatives/
-      └── ...
-
-/opt/apptainer/                      # Apptainer/Singularity images
-  ├── freesurfer.freesurfer.7.3.2.sif
-  ├── nipreps.fmriprep.25.1.4.sif
-  ├── pennlinc.qsiprep.1.0.1.sif
-  ├── pennlinc.qsirecon.1.1.1.sif
-  ├── meldproject.meld_graph.v2.2.3.sif
-  └── phys2bids.phys2bids.latest.sif
-```
-
-**Apptainer Recipe Files**:
-ln2t_tools includes Apptainer recipe files for building containers:
-- `apptainer_recipes/phys2bids.def`: Recipe for phys2bids container
-- Containers are automatically built on first use
-- See `apptainer_recipes/README.md` for manual build instructions
-
----
-
 ## Troubleshooting
 
 ### Images Not Found
@@ -1066,7 +1139,7 @@ ln2t_tools will attempt to build: freesurfer/freesurfer:7.3.2
 ```
 
 ### FreeSurfer License
-Ensure your FreeSurfer license is at `/opt/freesurfer/.license` or specify:
+Ensure your FreeSurfer license is at `~/licenses/license.txt` (default location) or specify:
 ```bash
 ln2t_tools freesurfer --dataset mydataset --participant-label 01 --fs-license /path/to/license.txt
 ```
