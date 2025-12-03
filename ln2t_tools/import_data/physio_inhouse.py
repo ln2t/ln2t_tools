@@ -87,11 +87,68 @@ def load_physio_config(config_path: Optional[Path] = None, sourcedata_dir: Optio
             config['DummyVolumes'] = 5
         
         logger.info(f"Loaded config: DummyVolumes = {config['DummyVolumes']}")
+        
+        # Log per-task overrides if present
+        if 'DummyVolumesPerTask' in config:
+            overrides = {k: v for k, v in config['DummyVolumesPerTask'].items() if not k.startswith('_')}
+            if overrides:
+                logger.info(f"Per-task DummyVolumes overrides: {overrides}")
+        
         return config
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON config file: {e}")
         raise
+
+
+def get_dummy_volumes_for_task(config: Dict, task: str, run: Optional[str] = None) -> int:
+    """Get the DummyVolumes value for a specific task/run combination.
+    
+    Looks up per-task overrides in the following order:
+    1. task-<taskname>_run-<runnum> (most specific)
+    2. task-<taskname> (task-level override)
+    3. Default DummyVolumes value
+    
+    Parameters
+    ----------
+    config : Dict
+        Configuration dictionary from load_physio_config()
+    task : str
+        Task name (without 'task-' prefix)
+    run : Optional[str]
+        Run number (without 'run-' prefix), or None if no run entity
+        
+    Returns
+    -------
+    int
+        Number of dummy volumes for this task/run
+    """
+    default_dummy = config.get('DummyVolumes', 5)
+    per_task = config.get('DummyVolumesPerTask', {})
+    
+    # Filter out comment/example keys
+    per_task = {k: v for k, v in per_task.items() if not k.startswith('_')}
+    
+    if not per_task:
+        return default_dummy
+    
+    # Try most specific first: task-<task>_run-<run>
+    if run is not None:
+        key_with_run = f"task-{task}_run-{run}"
+        if key_with_run in per_task:
+            dummy = per_task[key_with_run]
+            logger.info(f"Using per-task DummyVolumes={dummy} for {key_with_run}")
+            return dummy
+    
+    # Try task-level: task-<task>
+    key_task_only = f"task-{task}"
+    if key_task_only in per_task:
+        dummy = per_task[key_task_only]
+        logger.info(f"Using per-task DummyVolumes={dummy} for {key_task_only}")
+        return dummy
+    
+    # Fall back to default
+    return default_dummy
 
 
 def parse_physio_files(physio_dir: Path) -> List[Dict]:
@@ -441,9 +498,15 @@ def import_physio_inhouse(
     
     logger.info(f"Found physio directory: {physio_dir}")
     
-    # Get dummy volumes from config
-    dummy_volumes = config.get('DummyVolumes', 0)
-    logger.info(f"Using DummyVolumes = {dummy_volumes}")
+    # Log default DummyVolumes from config
+    default_dummy_volumes = config.get('DummyVolumes', 5)
+    logger.info(f"Default DummyVolumes = {default_dummy_volumes}")
+    
+    # Log per-task overrides if present
+    per_task_overrides = config.get('DummyVolumesPerTask', {})
+    per_task_overrides = {k: v for k, v in per_task_overrides.items() if not k.startswith('_')}
+    if per_task_overrides:
+        logger.info(f"Per-task DummyVolumes overrides configured: {per_task_overrides}")
     
     # If ds_initials not provided, try to infer
     if ds_initials is None:
@@ -546,11 +609,14 @@ def import_physio_inhouse(
             
             output_path = func_dir / output_name
             
+            # Get dummy volumes for this specific task/run
+            task_dummy_volumes = get_dummy_volumes_for_task(config, match['task'], match['run'])
+            
             success = process_physio_file(
                 physio_file=match['physio_file'],
                 signal_type=match['signal_type'],
                 tr=match['tr'],
-                dummy_volumes=dummy_volumes,
+                dummy_volumes=task_dummy_volumes,
                 output_path=output_path
             )
             

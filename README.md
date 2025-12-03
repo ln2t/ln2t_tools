@@ -23,6 +23,7 @@ ln2t_tools is a neuroimaging pipeline manager that supports multiple processing 
 5. [Configuration-Based Processing](#configuration-based-processing)
 6. [Instance Management](#instance-management)
 7. [Command-line Completion](#command-line-completion)
+8. [Adding a New Tool](#adding-a-new-tool)
 
 ---
 
@@ -1168,4 +1169,278 @@ ln2t_tools freesurfer --dataset mydataset --participant-label 01
 ln2t_tools meld_graph --dataset mydataset --participant-label 01
 ```
 
+---
 
+## Adding a New Tool
+
+ln2t_tools uses a modular plugin architecture that allows you to add new neuroimaging tools without modifying the core codebase. Each tool is self-contained in its own directory with CLI arguments, validation, and processing logic.
+
+### Quick Start
+
+1. Create a directory: `ln2t_tools/tools/mytool/`
+2. Create `__init__.py` and `tool.py`
+3. Implement the `BaseTool` interface
+4. Your tool is automatically discovered and available!
+
+### Step-by-Step Guide
+
+#### 1. Create the Tool Directory
+
+```bash
+mkdir -p ln2t_tools/tools/mytool
+```
+
+#### 2. Create `__init__.py`
+
+```python
+# ln2t_tools/tools/mytool/__init__.py
+"""My custom neuroimaging tool."""
+
+from .tool import MyTool
+
+# Required: export TOOL_CLASS for auto-discovery
+TOOL_CLASS = MyTool
+
+__all__ = ['MyTool', 'TOOL_CLASS']
+```
+
+#### 3. Create `tool.py` with BaseTool Implementation
+
+```python
+# ln2t_tools/tools/mytool/tool.py
+"""My custom tool implementation."""
+
+import argparse
+import logging
+from pathlib import Path
+from typing import List, Optional
+
+from bids import BIDSLayout
+
+from ln2t_tools.tools.base import BaseTool
+
+logger = logging.getLogger(__name__)
+
+
+class MyTool(BaseTool):
+    """My custom neuroimaging tool.
+    
+    Brief description of what the tool does and when to use it.
+    """
+    
+    # Required class attributes
+    name = "mytool"                                    # CLI subcommand name
+    help_text = "Brief help shown in ln2t_tools -h"   # Short description
+    description = "Detailed tool description"          # Long description
+    default_version = "1.0.0"                          # Default container version
+    requires_gpu = False                               # Set True if GPU-accelerated
+    
+    @classmethod
+    def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        """Add tool-specific CLI arguments.
+        
+        Common arguments (--dataset, --participant-label, --version, etc.)
+        are added automatically. Only add tool-specific options here.
+        """
+        parser.add_argument(
+            "--my-option",
+            default="default_value",
+            help="Description of my option (default: default_value)"
+        )
+        parser.add_argument(
+            "--my-flag",
+            action="store_true",
+            help="Enable special feature"
+        )
+    
+    @classmethod
+    def validate_args(cls, args: argparse.Namespace) -> bool:
+        """Validate tool-specific arguments.
+        
+        Returns True if arguments are valid, False otherwise.
+        Log error messages to explain validation failures.
+        """
+        # Example: check that required options are set
+        if getattr(args, 'my_option', None) == 'invalid':
+            logger.error("--my-option cannot be 'invalid'")
+            return False
+        return True
+    
+    @classmethod
+    def check_requirements(
+        cls,
+        layout: BIDSLayout,
+        participant_label: str,
+        args: argparse.Namespace
+    ) -> bool:
+        """Check if all requirements are met to process this participant.
+        
+        Verify that required input files exist and any prerequisites
+        (like FreeSurfer outputs) are available.
+        """
+        # Example: check for T1w image
+        t1w_files = layout.get(
+            subject=participant_label,
+            suffix='T1w',
+            extension=['.nii', '.nii.gz']
+        )
+        
+        if not t1w_files:
+            logger.warning(f"No T1w images found for {participant_label}")
+            return False
+        
+        return True
+    
+    @classmethod
+    def get_output_dir(
+        cls,
+        dataset_derivatives: Path,
+        participant_label: str,
+        args: argparse.Namespace,
+        session: Optional[str] = None,
+        run: Optional[str] = None
+    ) -> Path:
+        """Get the output directory path for this participant.
+        
+        Follow BIDS derivatives naming: {tool}_{version}/sub-{id}/
+        """
+        version = args.version or cls.default_version
+        subdir = f"sub-{participant_label}"
+        if session:
+            subdir = f"{subdir}_ses-{session}"
+        
+        return dataset_derivatives / f"{cls.name}_{version}" / subdir
+    
+    @classmethod
+    def build_command(
+        cls,
+        layout: BIDSLayout,
+        participant_label: str,
+        args: argparse.Namespace,
+        dataset_rawdata: Path,
+        dataset_derivatives: Path,
+        apptainer_img: str,
+        **kwargs
+    ) -> List[str]:
+        """Build the Apptainer command to run the tool.
+        
+        Returns a list of command components that will be joined
+        and executed via Apptainer.
+        """
+        version = args.version or cls.default_version
+        output_dir = cls.get_output_dir(
+            dataset_derivatives, participant_label, args
+        )
+        
+        # Build Apptainer command
+        cmd = [
+            "apptainer", "run", "--cleanenv",
+            # Bind directories
+            "-B", f"{dataset_rawdata}:/input:ro",
+            "-B", f"{dataset_derivatives}:/output",
+            # Container image
+            apptainer_img,
+            # Tool arguments
+            "/input",
+            "/output",
+            "--participant-label", participant_label,
+        ]
+        
+        # Add tool-specific options
+        if getattr(args, 'my_flag', False):
+            cmd.append("--my-flag")
+        
+        my_option = getattr(args, 'my_option', 'default_value')
+        cmd.extend(["--my-option", my_option])
+        
+        return cmd
+```
+
+#### 4. Test Your Tool
+
+```bash
+# Verify tool is discovered
+ln2t_tools --help
+# Should show: mytool - Brief help shown in ln2t_tools -h
+
+# View tool-specific help
+ln2t_tools mytool --help
+
+# Run on a participant
+ln2t_tools mytool --dataset mydata --participant-label 01 --my-option value
+```
+
+### Best Practices
+
+1. **Follow BIDS naming**: Output directories should follow `{tool}_{version}/` pattern
+2. **Validate inputs**: Check for required files in `check_requirements()`
+3. **Log clearly**: Use `logger.info()` for progress, `logger.warning()` for issues
+4. **Handle versions**: Use `args.version or cls.default_version` pattern
+5. **Document options**: Provide clear `--help` text for all arguments
+
+### Advanced Features
+
+#### Custom Processing Logic
+
+Override `process_subject()` for complex workflows:
+
+```python
+@classmethod
+def process_subject(
+    cls,
+    layout: BIDSLayout,
+    participant_label: str,
+    args: argparse.Namespace,
+    dataset_rawdata: Path,
+    dataset_derivatives: Path,
+    apptainer_img: str,
+    **kwargs
+) -> bool:
+    """Custom processing with multi-step workflow."""
+    # Step 1: Pre-processing
+    # Step 2: Main processing
+    # Step 3: Post-processing
+    return True
+```
+
+#### HPC Script Generation
+
+Override `generate_hpc_script()` for custom batch scripts:
+
+```python
+@classmethod
+def generate_hpc_script(
+    cls,
+    participant_label: str,
+    dataset: str,
+    args: argparse.Namespace,
+    **kwargs
+) -> str:
+    """Generate custom HPC batch script."""
+    return f"""#!/bin/bash
+#SBATCH --job-name={cls.name}_{participant_label}
+#SBATCH --gpus={1 if cls.requires_gpu else 0}
+...
+"""
+```
+
+### Directory Structure
+
+After adding a tool, your directory structure should look like:
+
+```
+ln2t_tools/tools/
+├── __init__.py          # Tool registry and discovery
+├── base.py              # BaseTool abstract class
+├── freesurfer/          # Existing tool
+│   ├── __init__.py
+│   └── tool.py
+├── fmriprep/            # Existing tool
+│   ├── __init__.py
+│   └── tool.py
+└── mytool/              # Your new tool
+    ├── __init__.py
+    └── tool.py
+```
+
+---

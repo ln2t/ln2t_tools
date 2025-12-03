@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from bids import BIDSLayout
 
-from ln2t_tools.cli.cli import parse_args, setup_terminal_colors
+from ln2t_tools.cli.cli import parse_args, setup_terminal_colors, configure_logging, log_minimal, MINIMAL
 from ln2t_tools.utils.utils import (
     list_available_datasets,
     list_missing_subjects,
@@ -31,10 +31,12 @@ from ln2t_tools.utils.demographics import (
     create_meld_demographics_from_participants,
     validate_meld_demographics
 )
-from ln2t_tools.utils.slurm import (
-    submit_slurm_job,
-    validate_slurm_config,
-    monitor_job
+from ln2t_tools.utils.hpc import (
+    submit_hpc_job,
+    submit_multiple_jobs,
+    validate_hpc_config,
+    check_required_data,
+    print_download_command
 )
 from ln2t_tools.utils.defaults import (
     DEFAULT_RAWDATA,
@@ -49,7 +51,7 @@ from ln2t_tools.utils.defaults import (
 )
 from ln2t_tools.import_data import import_dicom, import_mrs, import_physio
 
-# Setup logging
+# Setup initial logging (will be reconfigured based on --verbosity)
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -192,6 +194,19 @@ def handle_import(args):
         Parsed command line arguments
     """
     import subprocess
+    
+    # Display admin warning
+    logger.warning("="*70)
+    logger.warning("⚠️  ADMIN ONLY TOOL")
+    logger.warning("="*70)
+    logger.warning("This import tool requires:")
+    logger.warning("  - READ access to sourcedata directory")
+    logger.warning("  - WRITE access to rawdata directory")
+    logger.warning("")
+    logger.warning("Standard users should NOT use this tool.")
+    logger.warning("Imported data will be provided by administrators.")
+    logger.warning("="*70)
+    logger.warning("")
     
     # Validate required arguments
     if not args.dataset:
@@ -825,10 +840,10 @@ def process_meldgraph_subject(
         dataset_code: Path to dataset code directory
         apptainer_img: Path to Apptainer image
     """
-    # Check if SLURM submission requested
-    if getattr(args, 'slurm', False):
-        logger.info(f"Submitting MELD Graph job for {participant_label} to SLURM HPC...")
-        job_id = submit_slurm_job(
+    # Check if HPC submission requested
+    if getattr(args, 'hpc', False):
+        logger.info(f"Submitting MELD Graph job for {participant_label} to HPC...")
+        job_id = submit_hpc_job(
             tool="meld_graph",
             participant_label=participant_label,
             dataset=args.dataset,
@@ -836,19 +851,16 @@ def process_meldgraph_subject(
         )
         
         if job_id:
-            # Ask user if they want to monitor the job
-            logger.info("Job submitted successfully!")
-            logger.info("To monitor the job, you can:")
-            logger.info(f"  1. Run: ssh -i ~/.ssh/id_rsa.ceci -J {args.slurm_user}@gwceci.ulb.ac.be {args.slurm_user}@{args.slurm_host} 'squeue -j {job_id}'")
-            logger.info(f"  2. View output: ssh -i ~/.ssh/id_rsa.ceci -J {args.slurm_user}@gwceci.ulb.ac.be {args.slurm_user}@{args.slurm_host} 'tail -f ~/ln2t_slurm_jobs/{args.dataset}/meld_graph-{args.dataset}-{participant_label}_{job_id}.out'")
-            
-            # Optional: monitor job interactively
-            monitor = input("Monitor job progress now? [y/N]: ").lower().strip() == 'y'
-            if monitor:
-                monitor_job(job_id, args.slurm_user, args.slurm_host)
+            logger.info(f"Job submitted successfully! Job ID: {job_id}")
+            # Print download command
+            print_download_command(
+                tool="meld_graph",
+                dataset=args.dataset,
+                args=args
+            )
         else:
-            # SLURM submission failed - raise error to stop processing
-            raise RuntimeError(f"Failed to submit SLURM job for participant {participant_label}")
+            # HPC submission failed - raise error to stop processing
+            raise RuntimeError(f"Failed to submit HPC job for participant {participant_label}")
         
         return  # Exit early - job is submitted to HPC
     
@@ -1193,6 +1205,10 @@ def main(args=None) -> None:
     if args is None:
         args = parse_args()
         setup_terminal_colors()
+        
+        # Configure logging based on verbosity level
+        verbosity = getattr(args, 'verbosity', 'verbose')
+        configure_logging(verbosity)
 
     try:
         # Initialize instance manager
@@ -1430,9 +1446,9 @@ def main(args=None) -> None:
                                 mf.write(f"sub-{pid}\t{args.harmo_code}\t{ts}\n")
                         logger.info(f"Saved harmonization record: {meta_path}")
                         
-                        if getattr(args, 'slurm', False):
-                            # Submit SLURM job using meld_graph in harmonize mode
-                            job_id = submit_slurm_job(
+                        if getattr(args, 'hpc', False):
+                            # Submit HPC job using meld_graph in harmonize mode
+                            job_id = submit_hpc_job(
                                 tool="meld_graph",
                                 participant_label=args.harmo_code,  # use code for job name label
                                 dataset=dataset,
@@ -1440,10 +1456,15 @@ def main(args=None) -> None:
                             )
                             if job_id:
                                 logger.info(f"Submitted harmonization job {job_id} for {len(participant_list)} subjects")
-                                monitor_job(job_id, args.slurm_user, args.slurm_host)
+                                # Print download command
+                                print_download_command(
+                                    tool="meld_graph",
+                                    dataset=dataset,
+                                    args=args
+                                )
                                 successful_datasets.append(dataset)
                             else:
-                                logger.error("Failed to submit harmonization job to SLURM")
+                                logger.error("Failed to submit harmonization job to HPC")
                                 failed_datasets.append(dataset)
                             continue
                         else:
@@ -1485,7 +1506,7 @@ def main(args=None) -> None:
                         logger.warning(f"Unsupported tool {tool} for dataset {dataset}, skipping")
                         continue
                     
-                    logger.info(f"Running {tool} version {version} for dataset {dataset}")
+                    log_minimal(logger, f"Running {tool} version {version} for dataset {dataset}")
                     
                     # Set tool and version in args for this iteration
                     args.tool = tool
@@ -1497,9 +1518,57 @@ def main(args=None) -> None:
                         apptainer_img = ensure_image_exists(args.apptainer_dir, tool, version)
                         check_file_exists(args.fs_license)
 
+                        # Check if HPC submission is requested
+                        if getattr(args, 'hpc', False):
+                            log_minimal(logger, f"Submitting {tool} jobs to HPC for {len(participant_list)} participants...")
+                            
+                            # Validate HPC configuration
+                            validate_hpc_config(args)
+                            
+                            # Check required data on HPC and prompt for upload if needed
+                            data_ready = check_required_data(
+                                tool=tool,
+                                dataset=dataset,
+                                participant_labels=participant_list,
+                                args=args
+                            )
+                            
+                            if not data_ready:
+                                logger.error("Required data not available on HPC. Skipping this tool.")
+                                dataset_success = False
+                                continue
+                            
+                            # Submit jobs for all participants in parallel
+                            job_ids = submit_multiple_jobs(
+                                tool=tool,
+                                participant_labels=participant_list,
+                                dataset=dataset,
+                                args=args
+                            )
+                            
+                            if job_ids:
+                                logger.info(f"Successfully submitted {len(job_ids)} jobs to HPC")
+                                for i, job_id in enumerate(job_ids):
+                                    logger.info(f"  Job {i+1}/{len(job_ids)}: {job_id}")
+                                
+                                # Print download command for retrieving results
+                                print_download_command(
+                                    tool=tool,
+                                    dataset=dataset,
+                                    args=args
+                                )
+                                
+                                successful_datasets.append(dataset)
+                            else:
+                                logger.error("Failed to submit jobs to HPC")
+                                dataset_success = False
+                            
+                            # Skip local processing - jobs are on HPC
+                            continue
+
                         # Process each participant with this tool
                         for participant_label in participant_list:
-                            logger.info(f"Processing participant {participant_label} with {tool}")
+                            log_minimal(logger, f"Processing participant {participant_label} with {tool}")
                             
                             try:
                                 if tool == "freesurfer":
@@ -1548,7 +1617,7 @@ def main(args=None) -> None:
                                         dataset_code=dataset_code,
                                         apptainer_img=apptainer_img
                                     )
-                                logger.info(f"Successfully processed participant {participant_label} with {tool}")
+                                log_minimal(logger, f"✓ Successfully processed participant {participant_label} with {tool}")
                             except Exception as e:
                                 logger.error(f"Error processing participant {participant_label} with {tool}: {str(e)}")
                                 dataset_success = False
@@ -1562,7 +1631,7 @@ def main(args=None) -> None:
                         continue
 
                 if dataset_success:
-                    logger.info(f"Completed processing dataset: {dataset}")
+                    log_minimal(logger, f"✓ Completed processing dataset: {dataset}")
                     successful_datasets.append(dataset)
                 else:
                     logger.warning(f"Completed processing dataset: {dataset} (with some errors)")
@@ -1578,19 +1647,19 @@ def main(args=None) -> None:
         if len(datasets_to_process) == 1:
             # Single dataset case
             if successful_datasets:
-                logger.info(f"Successfully processed dataset: {successful_datasets[0]}")
+                log_minimal(logger, f"✓ Successfully processed dataset: {successful_datasets[0]}")
             else:
-                logger.error(f"Failed to process dataset: {failed_datasets[0]}")
+                logger.error(f"✗ Failed to process dataset: {failed_datasets[0]}")
         else:
             # Multiple datasets case
             if successful_datasets and not failed_datasets:
-                logger.info(f"Successfully processed all {len(successful_datasets)} datasets: {', '.join(successful_datasets)}")
+                log_minimal(logger, f"✓ Successfully processed all {len(successful_datasets)} datasets: {', '.join(successful_datasets)}")
             elif successful_datasets and failed_datasets:
                 logger.warning(f"Processed {len(successful_datasets)}/{len(datasets_to_process)} datasets successfully")
-                logger.info(f"Successful: {', '.join(successful_datasets)}")
-                logger.error(f"Failed: {', '.join(failed_datasets)}")
+                log_minimal(logger, f"Successful: {', '.join(successful_datasets)}")
+                logger.error(f"✗ Failed: {', '.join(failed_datasets)}")
             else:
-                logger.error(f"Failed to process all {len(failed_datasets)} datasets: {', '.join(failed_datasets)}")
+                logger.error(f"✗ Failed to process all {len(failed_datasets)} datasets: {', '.join(failed_datasets)}")
 
         # Exit with appropriate code
         if failed_datasets:

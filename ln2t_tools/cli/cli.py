@@ -2,6 +2,7 @@ import argparse
 import warnings
 import traceback
 import sys
+import logging
 from pathlib import Path
 from typing import Optional
 from types import TracebackType  # Add this import
@@ -11,6 +12,81 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_APPTAINER_DIR,
     MAX_PARALLEL_INSTANCES
 )
+
+# Import tool registry for dynamic tool loading
+from ln2t_tools.tools import get_all_tools, auto_discover_tools
+
+# Custom logging levels
+MINIMAL = 25  # Between INFO (20) and WARNING (30)
+logging.addLevelName(MINIMAL, "MINIMAL")
+
+
+def configure_logging(verbosity: str) -> None:
+    """Configure logging based on verbosity level.
+    
+    Parameters
+    ----------
+    verbosity : str
+        One of: 'silent', 'minimal', 'verbose', 'debug'
+        
+        - silent: Only errors (ERROR level)
+        - minimal: Essential info only (custom MINIMAL level, 25)
+        - verbose: Detailed steps (INFO level, default)
+        - debug: Everything including debug messages (DEBUG level)
+    """
+    level_map = {
+        'silent': logging.ERROR,
+        'minimal': MINIMAL,
+        'verbose': logging.INFO,
+        'debug': logging.DEBUG
+    }
+    
+    level = level_map.get(verbosity, logging.INFO)
+    
+    # Select formatter based on verbosity
+    if verbosity == 'debug':
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    elif verbosity == 'minimal':
+        formatter = logging.Formatter('%(message)s')
+    elif verbosity == 'silent':
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
+    else:  # verbose
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Configure ln2t_tools logger specifically
+    ln2t_logger = logging.getLogger('ln2t_tools')
+    ln2t_logger.setLevel(level)
+    
+    # Update all existing handlers
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+    
+    # If no handlers, add one
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
+
+
+def log_minimal(logger, message: str) -> None:
+    """Log a message at MINIMAL level.
+    
+    Use this for essential information that should appear even in minimal mode.
+    
+    Parameters
+    ----------
+    logger : logging.Logger
+        Logger instance
+    message : str
+        Message to log
+    """
+    logger.log(MINIMAL, message)
 
 
 def add_common_arguments(parser):
@@ -58,12 +134,98 @@ def add_common_arguments(parser):
     )
 
 
+def add_hpc_arguments(parser):
+    """Add HPC cluster submission arguments."""
+    parser.add_argument(
+        "--hpc",
+        action="store_true",
+        help="Submit job to HPC cluster instead of running locally"
+    )
+    parser.add_argument(
+        "--hpc-username",
+        type=str,
+        help="Username for HPC cluster (required if --hpc is used)"
+    )
+    parser.add_argument(
+        "--hpc-hostname",
+        type=str,
+        help="HPC cluster hostname (required if --hpc is used)"
+    )
+    parser.add_argument(
+        "--hpc-keyfile",
+        type=str,
+        default="~/.ssh/id_rsa",
+        help="Path to SSH private key file (default: ~/.ssh/id_rsa)"
+    )
+    parser.add_argument(
+        "--hpc-gateway",
+        type=str,
+        help="ProxyJump gateway hostname (optional, e.g., gwceci.ulb.ac.be)"
+    )
+    parser.add_argument(
+        "--hpc-rawdata",
+        type=str,
+        help="Path to rawdata on HPC (default: $GLOBALSCRATCH/rawdata on cluster)"
+    )
+    parser.add_argument(
+        "--hpc-derivatives",
+        type=str,
+        help="Path to derivatives on HPC (default: $GLOBALSCRATCH/derivatives on cluster)"
+    )
+    parser.add_argument(
+        "--hpc-apptainer-dir",
+        type=str,
+        help="Path to apptainer images directory on HPC (required if --hpc is used)"
+    )
+    parser.add_argument(
+        "--hpc-fs-license",
+        type=str,
+        help="Path to FreeSurfer license on HPC (default: $HOME/licenses/license.txt on cluster)"
+    )
+    parser.add_argument(
+        "--hpc-partition",
+        type=str,
+        help="HPC partition to use (default: None - let cluster decide)"
+    )
+    parser.add_argument(
+        "--hpc-time",
+        type=str,
+        default="24:00:00",
+        help="HPC job time limit (default: 24:00:00)"
+    )
+    parser.add_argument(
+        "--hpc-mem",
+        type=str,
+        default="32G",
+        help="HPC memory allocation (default: 32G)"
+    )
+    parser.add_argument(
+        "--hpc-cpus",
+        type=int,
+        default=8,
+        help="Number of CPUs to request (default: 8)"
+    )
+    parser.add_argument(
+        "--hpc-gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to request (default: 1, only for GPU-capable tools)"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments.
+
+    Uses the tool registry to dynamically create subparsers for each
+    registered tool. This allows new tools to be added without modifying
+    this file.
 
     Returns:
         argparse.Namespace: Parsed command line arguments
     """
+    # Auto-discover tools from the tools/ directory
+    auto_discover_tools()
+    
     parser = argparse.ArgumentParser(
         description="LN2T Tools - Neuroimaging Pipeline Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -88,249 +250,45 @@ def parse_args() -> argparse.Namespace:
         help="Show currently running instances"
     )
 
+    parser.add_argument(
+        "--verbosity",
+        choices=["silent", "minimal", "verbose", "debug"],
+        default="verbose",
+        help="Logging verbosity level: silent (errors only), minimal (essential info), verbose (detailed steps, default), debug (everything)"
+    )
+
     # Create subparsers for each tool
     subparsers = parser.add_subparsers(dest='tool', help='Neuroimaging tool to use')
 
-    # FreeSurfer subcommand
-    parser_freesurfer = subparsers.add_parser(
-        'freesurfer',
-        help='FreeSurfer cortical reconstruction',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    add_common_arguments(parser_freesurfer)
+    # Dynamically create subparsers from registered tools
+    for tool_name, tool_class in get_all_tools().items():
+        tool_parser = subparsers.add_parser(
+            tool_name,
+            help=tool_class.description,
+            formatter_class=argparse.RawDescriptionHelpFormatter
+        )
+        # Add common arguments (dataset, participant, version, etc.)
+        add_common_arguments(tool_parser)
+        # Add HPC arguments for cluster submission
+        add_hpc_arguments(tool_parser)
+        # Add tool-specific arguments
+        tool_class.add_arguments(tool_parser)
 
-    # fMRIPrep subcommand
-    parser_fmriprep = subparsers.add_parser(
-        'fmriprep',
-        help='fMRIPrep functional MRI preprocessing',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    add_common_arguments(parser_fmriprep)
-    parser_fmriprep.add_argument(
-        "--fs-no-reconall",
-        action="store_true",
-        help="Skip FreeSurfer surface reconstruction"
-    )
-    parser_fmriprep.add_argument(
-        "--output-spaces",
-        default="MNI152NLin2009cAsym:res-2",
-        help="Output spaces (default: MNI152NLin2009cAsym:res-2)"
-    )
-    parser_fmriprep.add_argument(
-        "--nprocs",
-        type=int,
-        default=8,
-        help="Number of processes to use (default: 8)"
-    )
-    parser_fmriprep.add_argument(
-        "--omp-nthreads",
-        type=int,
-        default=8,
-        help="Number of OpenMP threads (default: 8)"
-    )
-
-    # QSIPrep subcommand
-    parser_qsiprep = subparsers.add_parser(
-        'qsiprep',
-        help='QSIPrep diffusion MRI preprocessing',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    add_common_arguments(parser_qsiprep)
-    parser_qsiprep.add_argument(
-        "--output-resolution",
-        type=float,
-        required=True,
-        help="Isotropic voxel size in mm for output (required)"
-    )
-    parser_qsiprep.add_argument(
-        "--denoise-method",
-        choices=["dwidenoise", "patch2self", "none"],
-        default="dwidenoise",
-        help="Denoising method (default: dwidenoise)"
-    )
-    parser_qsiprep.add_argument(
-        "--dwi-only",
-        action="store_true",
-        help="Process only DWI data, ignore anatomical data"
-    )
-    parser_qsiprep.add_argument(
-        "--anat-only",
-        action="store_true",
-        help="Process only anatomical data"
-    )
-    parser_qsiprep.add_argument(
-        "--nprocs",
-        type=int,
-        default=8,
-        help="Number of processes to use (default: 8)"
-    )
-    parser_qsiprep.add_argument(
-        "--omp-nthreads",
-        type=int,
-        default=8,
-        help="Number of OpenMP threads (default: 8)"
-    )
-
-    # QSIRecon subcommand
-    parser_qsirecon = subparsers.add_parser(
-        'qsirecon',
-        help='QSIRecon diffusion MRI reconstruction',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    add_common_arguments(parser_qsirecon)
-    parser_qsirecon.add_argument(
-        "--qsiprep-version",
-        help="QSIPrep version to use as input (default: uses DEFAULT_QSIPREP_VERSION)"
-    )
-    parser_qsirecon.add_argument(
-        "--recon-spec",
-        default="mrtrix_multishell_msmt_ACT-hsvs",
-        help="Reconstruction spec (default: mrtrix_multishell_msmt_ACT-hsvs)"
-    )
-    parser_qsirecon.add_argument(
-        "--nprocs",
-        type=int,
-        default=8,
-        help="Number of processes to use (default: 8)"
-    )
-    parser_qsirecon.add_argument(
-        "--omp-nthreads",
-        type=int,
-        default=8,
-        help="Number of OpenMP threads (default: 8)"
-    )
-
-    # MELD Graph subcommand
-    parser_meld = subparsers.add_parser(
-        'meld_graph',
-        help='MELD Graph lesion detection',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    add_common_arguments(parser_meld)
-    parser_meld.add_argument(
-        "--participants-file",
-        type=str,
-        help="Path to a text file with one subject ID per line (with or without 'sub-' prefix), used for harmonization runs"
-    )
-    parser_meld.add_argument(
-        "--fs-version",
-        help="FreeSurfer version to use as input (default: uses DEFAULT_MELD_FS_VERSION)"
-    )
-    parser_meld.add_argument(
-        "--download-weights",
-        action="store_true",
-        help="Download MELD Graph model weights (run once before first use)"
-    )
-    parser_meld.add_argument(
-        "--harmonize",
-        action="store_true",
-        help="Compute harmonization parameters for the provided cohort"
-    )
-    parser_meld.add_argument(
-        "--harmonize-only",
-        action="store_true",
-        help="Compute harmonization parameters only (requires --harmo-code)"
-    )
-    parser_meld.add_argument(
-        "--harmo-code",
-        help="Harmonization code for scanner (e.g., H1, H2)"
-    )
-    parser_meld.add_argument(
-        "--demographics",
-        help="Path to demographics CSV file (optional - auto-generated from participants.tsv if not provided)"
-    )
-    parser_meld.add_argument(
-        "--use-precomputed-fs",
-        action="store_true",
-        help="Use precomputed FreeSurfer outputs instead of running FreeSurfer"
-    )
-    parser_meld.add_argument(
-        "--skip-segmentation",
-        action="store_true",
-        help="Skip FreeSurfer segmentation step (use with --use-precomputed-fs)"
-    )
-    parser_meld.add_argument(
-        "--no-gpu",
-        action="store_true",
-        help="Disable GPU and use CPU for inference (slower but uses less memory)"
-    )
-    parser_meld.add_argument(
-        "--gpu-memory-limit",
-        type=int,
-        default=128,
-        help="GPU memory split size in MB for PyTorch (default: 128)"
-    )
-    parser_meld.add_argument(
-        "--slurm",
-        action="store_true",
-        help="Submit job to SLURM HPC cluster instead of running locally"
-    )
-    parser_meld.add_argument(
-        "--slurm-user",
-        type=str,
-        help="Username for HPC cluster (required if --slurm is used)"
-    )
-    parser_meld.add_argument(
-        "--slurm-host",
-        type=str,
-        default="lyra.ulb.be",
-        help="HPC cluster hostname (default: lyra.ulb.be)"
-    )
-    parser_meld.add_argument(
-        "--slurm-rawdata",
-        type=str,
-        help="Path to rawdata on HPC (default: $GLOBALSCRATCH/rawdata on cluster)"
-    )
-    parser_meld.add_argument(
-        "--slurm-derivatives",
-        type=str,
-        help="Path to derivatives on HPC (default: $GLOBALSCRATCH/derivatives on cluster)"
-    )
-    parser_meld.add_argument(
-        "--slurm-apptainer-dir",
-        type=str,
-        help="Path to apptainer images directory on HPC (required if --slurm is used)"
-    )
-    parser_meld.add_argument(
-        "--slurm-fs-license",
-        type=str,
-        help="Path to FreeSurfer license on HPC (default: $HOME/licenses/license.txt on cluster)"
-    )
-    parser_meld.add_argument(
-        "--slurm-fs-version",
-        type=str,
-        default="7.2.0",
-        help="FreeSurfer version to use on HPC (default: 7.2.0)"
-    )
-    parser_meld.add_argument(
-        "--slurm-partition",
-        type=str,
-        default=None,
-        help="SLURM partition to use (default: None - let cluster decide)"
-    )
-    parser_meld.add_argument(
-        "--slurm-time",
-        type=str,
-        default="1:00:00",
-        help="SLURM job time limit (default: 1:00:00)"
-    )
-    parser_meld.add_argument(
-        "--slurm-mem",
-        type=str,
-        default="32G",
-        help="SLURM memory allocation (default: 32G)"
-    )
-    parser_meld.add_argument(
-        "--slurm-gpus",
-        type=int,
-        default=1,
-        help="Number of GPUs to request (default: 1)"
-    )
-
-    # Import subcommand
+    # Import subcommand (special case - not a standard tool)
     parser_import = subparsers.add_parser(
         'import',
-        help='Import source data to BIDS format',
+        help='Import source data to BIDS format (ADMIN ONLY)',
+        description="""
+Import source data to BIDS format.
+
+⚠️  WARNING: ADMIN ONLY
+This tool is intended for administrators only. It requires:
+  - READ access to sourcedata directory
+  - WRITE access to rawdata directory
+  
+Standard users should not use this tool. Imported data will be provided
+by administrators in the rawdata directory.
+""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     add_common_arguments(parser_import)
