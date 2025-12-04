@@ -55,6 +55,7 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_MELD_FS_VERSION
 )
 from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio
+from ln2t_tools.import_data.dicom import discover_participants_from_dicom_dir
 
 # Setup initial logging (will be reconfigured based on --verbosity)
 logging.basicConfig(
@@ -266,14 +267,27 @@ def handle_import(args):
             logger.error("--ds-initials is required for MRS pre-import")
             return
         
-        # For pre-import, we need participant_labels
-        if not args.participant_label:
-            logger.error("--participant-label is required for MRS pre-import")
-            return
+        # For pre-import, auto-discover participants from DICOM directory if not specified
+        participant_labels = args.participant_label
+        if not participant_labels:
+            dicom_dir = sourcedata_dir / "dicom"
+            if not dicom_dir.exists():
+                logger.error(f"DICOM directory not found: {dicom_dir}")
+                logger.error("Cannot auto-discover participants without DICOM data")
+                return
+            
+            logger.info("Auto-discovering participants from DICOM directory...")
+            participant_labels = discover_participants_from_dicom_dir(dicom_dir, ds_initials)
+            
+            if not participant_labels:
+                logger.error(f"No participants found in {dicom_dir} matching pattern {ds_initials}*")
+                return
+            
+            logger.info(f"Discovered {len(participant_labels)} participants: {participant_labels}")
         
         pre_import_success = pre_import_mrs(
             dataset=dataset,
-            participant_labels=args.participant_label,
+            participant_labels=participant_labels,
             sourcedata_dir=sourcedata_dir,
             ds_initials=ds_initials,
             session=getattr(args, 'session', None),
