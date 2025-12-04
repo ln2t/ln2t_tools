@@ -218,9 +218,8 @@ def handle_import(args):
         logger.error("--dataset is required for import")
         return
     
-    if not args.participant_label:
-        logger.error("--participant-label is required for import (one or more participant IDs)")
-        return
+    # Note: --participant-label is optional for import
+    # If not provided, participants will be auto-discovered from the dicom directory
     
     # Setup directories
     dataset = args.dataset
@@ -240,7 +239,10 @@ def handle_import(args):
     logger.info(f"Importing data for dataset: {dataset}")
     logger.info(f"Source: {sourcedata_dir}")
     logger.info(f"Target: {rawdata_dir}")
-    logger.info(f"Participants: {', '.join(args.participant_label)}")
+    if args.participant_label:
+        logger.info(f"Participants: {', '.join(args.participant_label)}")
+    else:
+        logger.info("Participants: auto-discover from dicom directory")
     if getattr(args, 'session', None):
         logger.info(f"Session: {args.session}")
     
