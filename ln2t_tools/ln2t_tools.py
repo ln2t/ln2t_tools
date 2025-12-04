@@ -299,13 +299,25 @@ def handle_import(args):
         
         if pre_import_success:
             logger.info("✓ MRS pre-import completed successfully")
+            
+            # Print sample command to run the actual import
+            logger.info(f"\n{'='*60}")
+            logger.info("To run the MRS BIDS conversion, use:")
+            logger.info(f"{'='*60}")
+            
+            cmd_parts = ["ln2t_tools import"]
+            cmd_parts.append(f"--dataset {dataset}")
+            cmd_parts.append("--datatype mrs")
+            cmd_parts.append(f"--ds-initials {ds_initials}")
+            if getattr(args, 'session', None):
+                cmd_parts.append(f"--session {args.session}")
+            
+            logger.info(f"\n  {' '.join(cmd_parts)}\n")
         else:
             logger.error("✗ MRS pre-import failed")
         
-        # After pre-import, exit unless user also wants to run the full import
-        if getattr(args, 'datatype', 'all') not in ['mrs', 'all']:
-            logger.info("Pre-import complete. Run with --datatype mrs to continue with BIDS conversion.")
-            return
+        # Always exit after pre-import (don't automatically proceed with import)
+        return
     
     # Determine which datatypes to import
     datatype_arg = getattr(args, 'datatype', 'all')
