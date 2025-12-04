@@ -269,6 +269,9 @@ def handle_import(args):
                 logger.info(f"No dicom directory found in {sourcedata_dir}, skipping")
                 continue
             
+            # Compress source by default, unless --skip-source-compression is set
+            compress_source = not getattr(args, 'skip_source_compression', False)
+            
             import_success['dicom'] = import_dicom(
                 dataset=dataset,
                 participant_labels=args.participant_label,
@@ -276,7 +279,7 @@ def handle_import(args):
                 rawdata_dir=rawdata_dir,
                 ds_initials=getattr(args, 'ds_initials', None),
                 session=getattr(args, 'session', None),
-                compress_source=getattr(args, 'compress_source', False),
+                compress_source=compress_source,
                 deface=getattr(args, 'deface', False),
                 venv_path=venv_path,
                 keep_tmp_files=getattr(args, 'keep_tmp_files', False)
@@ -288,6 +291,9 @@ def handle_import(args):
                 logger.info(f"No mrs/pfiles directory found in {sourcedata_dir}, skipping")
                 continue
             
+            # Compress source by default, unless --skip-source-compression is set
+            compress_source = not getattr(args, 'skip_source_compression', False)
+            
             import_success['mrs'] = import_mrs(
                 dataset=dataset,
                 participant_labels=args.participant_label,
@@ -295,7 +301,7 @@ def handle_import(args):
                 rawdata_dir=rawdata_dir,
                 ds_initials=getattr(args, 'ds_initials', None),
                 session=getattr(args, 'session', None),
-                compress_source=getattr(args, 'compress_source', False),
+                compress_source=compress_source,
                 venv_path=venv_path
             )
         
@@ -305,6 +311,9 @@ def handle_import(args):
                 logger.info(f"No physio directory found in {sourcedata_dir}, skipping")
                 continue
             
+            # Compress source by default, unless --skip-source-compression is set
+            compress_source = not getattr(args, 'skip_source_compression', False)
+            
             import_success['physio'] = import_physio(
                 dataset=dataset,
                 participant_labels=args.participant_label,
@@ -312,7 +321,7 @@ def handle_import(args):
                 rawdata_dir=rawdata_dir,
                 ds_initials=getattr(args, 'ds_initials', None),
                 session=getattr(args, 'session', None),
-                compress_source=getattr(args, 'compress_source', False),
+                compress_source=compress_source,
                 use_phys2bids=getattr(args, 'phys2bids', False),
                 physio_config=getattr(args, 'physio_config', None),
                 apptainer_dir=apptainer_dir

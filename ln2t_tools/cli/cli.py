@@ -307,9 +307,9 @@ by administrators in the rawdata directory.
         help="Dataset initials prefix for source data (e.g., 'CB', 'HP')"
     )
     parser_import.add_argument(
-        "--compress-source",
+        "--skip-source-compression",
         action="store_true",
-        help="Compress source data after successful import (creates .tar.gz archives)"
+        help="Skip compressing source data after import (by default, source is compressed and original deleted)"
     )
     parser_import.add_argument(
         "--deface",
