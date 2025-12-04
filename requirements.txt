@@ -28,6 +28,7 @@ numpy==2.3.2
 packaging==25.0
 pandas==2.3.1
 pybids==0.19.0
+pydicom>=2.4.0
 python-dateutil==2.9.0.post0
 pytz==2025.2
 PyYAML==6.0.2
