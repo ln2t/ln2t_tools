@@ -303,10 +303,6 @@ by administrators in the rawdata directory.
         help="Session label (without 'ses-' prefix) for multi-session datasets"
     )
     parser_import.add_argument(
-        "--ds-initials",
-        help="Dataset initials prefix for source data (e.g., 'CB', 'HP')"
-    )
-    parser_import.add_argument(
         "--skip-source-compression",
         action="store_true",
         help="Skip compressing source data after import (by default, source is compressed and original deleted)"

@@ -25,7 +25,8 @@ from ln2t_tools.utils.utils import (
     create_meld_config_json,
     create_meld_dataset_description,
     prepare_meld_input_symlinks,
-    download_meld_weights
+    download_meld_weights,
+    get_dataset_initials
 )
 from ln2t_tools.utils.demographics import (
     create_meld_demographics_from_participants,
@@ -262,11 +263,13 @@ def handle_import(args):
         logger.info("MRS PRE-IMPORT: Gathering P-files from scanner backup")
         logger.info(f"{'='*60}")
         
-        # For pre-import, we need ds_initials
-        ds_initials = getattr(args, 'ds_initials', None)
+        # Auto-infer ds_initials from dataset name
+        ds_initials = get_dataset_initials(dataset)
         if not ds_initials:
-            logger.error("--ds-initials is required for MRS pre-import")
+            logger.error(f"Could not infer dataset initials from '{dataset}'")
+            logger.error("Dataset name should follow pattern: YYYY-Name_Parts-hexhash")
             return
+        logger.info(f"Using dataset initials: {ds_initials}")
         
         # For pre-import, auto-discover participants from DICOM directory if not specified
         participant_labels = args.participant_label
@@ -309,7 +312,6 @@ def handle_import(args):
             cmd_parts = ["ln2t_tools import"]
             cmd_parts.append(f"--dataset {dataset}")
             cmd_parts.append("--datatype mrs")
-            cmd_parts.append(f"--ds-initials {ds_initials}")
             if getattr(args, 'session', None):
                 cmd_parts.append(f"--session {args.session}")
             
@@ -345,7 +347,7 @@ def handle_import(args):
                 participant_labels=args.participant_label,
                 sourcedata_dir=sourcedata_dir,
                 rawdata_dir=rawdata_dir,
-                ds_initials=getattr(args, 'ds_initials', None),
+                ds_initials=get_dataset_initials(dataset),
                 session=getattr(args, 'session', None),
                 compress_source=compress_source,
                 deface=getattr(args, 'deface', False),
@@ -367,7 +369,7 @@ def handle_import(args):
                 participant_labels=args.participant_label,
                 sourcedata_dir=sourcedata_dir,
                 rawdata_dir=rawdata_dir,
-                ds_initials=getattr(args, 'ds_initials', None),
+                ds_initials=get_dataset_initials(dataset),
                 session=getattr(args, 'session', None),
                 compress_source=compress_source,
                 venv_path=venv_path
@@ -387,7 +389,7 @@ def handle_import(args):
                 participant_labels=args.participant_label,
                 sourcedata_dir=sourcedata_dir,
                 rawdata_dir=rawdata_dir,
-                ds_initials=getattr(args, 'ds_initials', None),
+                ds_initials=get_dataset_initials(dataset),
                 session=getattr(args, 'session', None),
                 compress_source=compress_source,
                 use_phys2bids=getattr(args, 'phys2bids', False),

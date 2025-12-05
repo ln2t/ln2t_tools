@@ -992,3 +992,28 @@ def download_meld_weights(
         logger.error(f"Failed to download MELD Graph weights and parameters (exit code: {exit_code})")
         return False
 
+
+def get_dataset_initials(dataset: str) -> str:
+    """Infer dataset initials from the dataset name.
+    
+    The dataset name follows the pattern: YYYY-Name_Parts-hexhash
+    Initials are the first letter of each word in the name part.
+    
+    Args:
+        dataset: Dataset name (e.g., "2024-Happy_Panda-236462bcdc71")
+        
+    Returns:
+        Initials string (e.g., "HP")
+        
+    Examples:
+        >>> get_dataset_initials("2024-Happy_Panda-236462bcdc71")
+        'HP'
+        >>> get_dataset_initials("2023-My_Cool_Dataset-abc123")
+        'MCD'
+    """
+    parts = dataset.split('-')
+    if len(parts) >= 2:
+        name_part = parts[1]
+        words = name_part.replace('_', ' ').split()
+        return ''.join([w[0].upper() for w in words if w])
+    return ''
