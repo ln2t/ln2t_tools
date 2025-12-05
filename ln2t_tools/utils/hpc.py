@@ -257,6 +257,298 @@ def get_hpc_image_build_command(
     return f"ssh {ssh_opts} {username}@{hostname} '{build_cmd}'"
 
 
+def get_tool_owner(tool: str) -> str:
+    """Get Docker Hub owner for a tool.
+    
+    Parameters
+    ----------
+    tool : str
+        Tool name
+        
+    Returns
+    -------
+    str
+        Docker Hub owner/organization
+    """
+    tool_owners = {
+        "freesurfer": "freesurfer",
+        "fastsurfer": "deepmi",
+        "fmriprep": "nipreps",
+        "qsiprep": "pennlinc",
+        "qsirecon": "pennlinc",
+        "meld_graph": "meldproject",
+    }
+    return tool_owners.get(tool, tool)
+
+
+def generate_apptainer_build_script(
+    tool: str,
+    version: str,
+    hpc_apptainer_dir: str,
+    dataset: str
+) -> str:
+    """Generate SLURM script for building an Apptainer image on HPC.
+    
+    Parameters
+    ----------
+    tool : str
+        Tool name
+    version : str
+        Tool version/tag
+    hpc_apptainer_dir : str
+        Path to apptainer images directory on HPC
+    dataset : str
+        Dataset name (for job naming and output paths)
+        
+    Returns
+    -------
+    str
+        SLURM batch script content
+    """
+    tool_owner = get_tool_owner(tool)
+    image_name = f"{tool_owner}.{tool}.{version}.sif"
+    remote_path = f"{hpc_apptainer_dir}/{image_name}"
+    docker_uri = f"docker://{tool_owner}/{tool}:{version}"
+    
+    job_name = f"apptainer_build_{tool}_{version}".replace(".", "_")
+    
+    script = f"""#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --cpus-per-task=4
+#SBATCH --time=4:00:00
+#SBATCH --mem=32G
+#SBATCH --output={job_name}_%j.out
+#SBATCH --error={job_name}_%j.err
+
+# Apptainer Build Job
+# ===================
+# Tool: {tool}
+# Version: {version}
+# Docker URI: {docker_uri}
+# Output: {remote_path}
+
+echo "Job started at: $(date)"
+echo "Running on node: $(hostname)"
+echo "Job ID: $SLURM_JOB_ID"
+
+# Create output directory if needed
+mkdir -p {hpc_apptainer_dir}
+
+# Set temporary directory for build (use local scratch if available)
+if [ -d "$LOCALSCRATCH" ]; then
+    export APPTAINER_TMPDIR="$LOCALSCRATCH"
+    echo "Using LOCALSCRATCH for temp: $APPTAINER_TMPDIR"
+elif [ -d "/tmp" ]; then
+    export APPTAINER_TMPDIR="/tmp/$USER/apptainer_build_$$"
+    mkdir -p "$APPTAINER_TMPDIR"
+    echo "Using /tmp for temp: $APPTAINER_TMPDIR"
+fi
+
+# Build the image
+echo ""
+echo "Building Apptainer image..."
+echo "  Source: {docker_uri}"
+echo "  Target: {remote_path}"
+echo ""
+
+apptainer build {remote_path} {docker_uri}
+
+BUILD_STATUS=$?
+
+# Cleanup temp directory
+if [ -n "$APPTAINER_TMPDIR" ] && [ -d "$APPTAINER_TMPDIR" ]; then
+    rm -rf "$APPTAINER_TMPDIR"
+fi
+
+if [ $BUILD_STATUS -eq 0 ]; then
+    echo ""
+    echo "✓ Build completed successfully!"
+    echo "  Image saved to: {remote_path}"
+    ls -lh {remote_path}
+else
+    echo ""
+    echo "✗ Build failed with exit code: $BUILD_STATUS"
+fi
+
+echo ""
+echo "Job finished at: $(date)"
+
+exit $BUILD_STATUS
+"""
+    return script
+
+
+def prompt_apptainer_build(
+    tool: str,
+    version: str,
+    dataset: str,
+    args: Any
+) -> bool:
+    """Prompt user to build missing Apptainer image on HPC.
+    
+    If user accepts, submits a build job to the HPC.
+    If user declines, saves the job script locally and prints manual instructions.
+    
+    Parameters
+    ----------
+    tool : str
+        Tool name
+    version : str
+        Tool version
+    dataset : str
+        Dataset name
+    args : Any
+        Arguments namespace with HPC configuration
+        
+    Returns
+    -------
+    bool
+        True if build job was submitted, False otherwise (user can re-run after build)
+    """
+    username = args.hpc_username
+    hostname = args.hpc_hostname
+    keyfile = args.hpc_keyfile
+    gateway = getattr(args, 'hpc_gateway', None)
+    hpc_apptainer_dir = args.hpc_apptainer_dir
+    
+    tool_owner = get_tool_owner(tool)
+    image_name = f"{tool_owner}.{tool}.{version}.sif"
+    remote_path = f"{hpc_apptainer_dir}/{image_name}"
+    docker_uri = f"docker://{tool_owner}/{tool}:{version}"
+    
+    print("\n" + "="*70)
+    print("⚠️  MISSING APPTAINER IMAGE ON HPC")
+    print("="*70)
+    print(f"\nThe required Apptainer image was not found on the cluster:")
+    print(f"  Tool: {tool}")
+    print(f"  Version: {version}")
+    print(f"  Expected path: {remote_path}")
+    print("")
+    print("Building Apptainer images can be memory-intensive and may fail in")
+    print("interactive sessions. We recommend submitting a batch job to build it.")
+    print("")
+    
+    response = input("Would you like to submit a job to build the image? [y/N]: ").strip().lower()
+    
+    # Generate the build script
+    script_content = generate_apptainer_build_script(
+        tool=tool,
+        version=version,
+        hpc_apptainer_dir=hpc_apptainer_dir,
+        dataset=dataset
+    )
+    
+    # Prepare paths for saving
+    code_dir = Path.home() / "code" / f"{dataset}-code"
+    code_dir.mkdir(parents=True, exist_ok=True)
+    local_script_path = code_dir / f"build_apptainer_{tool}_{version.replace('.', '_')}.sh"
+    
+    if response == 'y':
+        # Submit the job
+        print(f"\nSubmitting Apptainer build job...")
+        
+        try:
+            # Create temporary script file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+                f.write(script_content)
+                temp_script = f.name
+            
+            # Create remote directory for job scripts
+            remote_dir = f"~/ln2t_hpc_jobs/apptainer_builds"
+            ssh_cmd = get_ssh_command(username, hostname, keyfile, gateway) + [f"mkdir -p {remote_dir}"]
+            subprocess.run(ssh_cmd, check=True, capture_output=True)
+            
+            # Copy script to HPC
+            remote_script = f"{remote_dir}/build_{tool}_{version.replace('.', '_')}.sh"
+            scp_cmd = get_scp_command(username, hostname, keyfile, gateway) + [
+                temp_script, f"{username}@{hostname}:{remote_script}"
+            ]
+            subprocess.run(scp_cmd, check=True, capture_output=True)
+            
+            # Submit job
+            ssh_cmd = get_ssh_command(username, hostname, keyfile, gateway) + [
+                f"cd {remote_dir} && sbatch build_{tool}_{version.replace('.', '_')}.sh"
+            ]
+            result = subprocess.run(ssh_cmd, capture_output=True, text=True, check=True)
+            
+            # Parse job ID
+            job_id = None
+            for text in [result.stdout.strip(), result.stderr.strip()]:
+                match = re.search(r'Submitted batch job (\d+)', text)
+                if match:
+                    job_id = match.group(1)
+                    break
+            
+            # Save script locally for reference
+            with open(local_script_path, 'w') as f:
+                f.write(script_content)
+            
+            print("\n" + "="*70)
+            print("✓ APPTAINER BUILD JOB SUBMITTED")
+            print("="*70)
+            if job_id:
+                print(f"\n  Job ID: {job_id}")
+            print(f"  Remote script: {remote_script}")
+            print(f"  Local copy: {local_script_path}")
+            print("")
+            print("Next steps:")
+            print(f"  1. Monitor the job: ssh {username}@{hostname} 'squeue -u {username}'")
+            print(f"  2. Check job output: ssh {username}@{hostname} 'cat ~/ln2t_hpc_jobs/apptainer_builds/*.out'")
+            print(f"  3. Once complete, re-run your original command")
+            print("")
+            print("="*70 + "\n")
+            
+            # Cleanup
+            Path(temp_script).unlink(missing_ok=True)
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to submit build job: {e}")
+            print(f"\n✗ Failed to submit job. Error: {e.stderr if hasattr(e, 'stderr') else e}")
+            # Fall through to save script locally
+            response = 'n'
+        except Exception as e:
+            logger.error(f"Error submitting build job: {e}")
+            print(f"\n✗ Error: {e}")
+            response = 'n'
+    
+    # User declined or submission failed - save script locally
+    with open(local_script_path, 'w') as f:
+        f.write(script_content)
+    
+    print("\n" + "="*70)
+    print("📋 MANUAL BUILD INSTRUCTIONS")
+    print("="*70)
+    print(f"\nThe SLURM job script has been saved to:")
+    print(f"  {local_script_path}")
+    print("")
+    print("To submit the build job manually:")
+    print("")
+    print(f"  1. Copy the script to the HPC:")
+    
+    # Build scp command for display
+    scp_opts = f"-i {keyfile}"
+    if gateway:
+        scp_opts += f" -o ProxyJump={username}@{gateway}"
+    print(f"     scp {scp_opts} {local_script_path} {username}@{hostname}:~/")
+    print("")
+    print(f"  2. SSH to the HPC and submit the job:")
+    ssh_opts = f"-i {keyfile}"
+    if gateway:
+        ssh_opts += f" -J {username}@{gateway}"
+    print(f"     ssh {ssh_opts} {username}@{hostname}")
+    print(f"     sbatch ~/build_apptainer_{tool}_{version.replace('.', '_')}.sh")
+    print("")
+    print("Alternatively, build interactively (if you have enough memory):")
+    print(f"     apptainer build {remote_path} {docker_uri}")
+    print("")
+    print("Once the image is built, re-run your original command.")
+    print("="*70 + "\n")
+    
+    return False
+
+
 def get_scp_command(username: str, hostname: str, keyfile: str, gateway: Optional[str] = None) -> list:
     """Get SCP command with proper key configuration and optional ProxyJump.
     

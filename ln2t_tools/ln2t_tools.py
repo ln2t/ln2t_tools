@@ -39,6 +39,7 @@ from ln2t_tools.utils.hpc import (
     print_download_command,
     check_apptainer_image_exists_on_hpc,
     get_hpc_image_build_command,
+    prompt_apptainer_build,
     start_ssh_control_master,
     test_ssh_connection,
 )
@@ -1706,19 +1707,16 @@ def main(args=None) -> None:
                             )
 
                             if not image_ok:
-                                build_cmd = get_hpc_image_build_command(
-                                    username=username,
-                                    hostname=hostname,
-                                    keyfile=keyfile,
-                                    gateway=gateway,
-                                    hpc_apptainer_dir=hpc_apptainer_dir,
+                                # Prompt user to build the image
+                                build_submitted = prompt_apptainer_build(
                                     tool=tool,
-                                    version=version
+                                    version=version,
+                                    dataset=dataset,
+                                    args=args
                                 )
-                                logger.error(
-                                    f"Apptainer image for {tool} ({version}) not found on HPC at {hpc_apptainer_dir}.\n"
-                                    f"To build the image on the HPC, run:\n\n    {build_cmd}\n"
-                                )
+                                
+                                # Whether user submitted a build job or saved script locally,
+                                # we cannot proceed without the image
                                 dataset_success = False
                                 continue
 
