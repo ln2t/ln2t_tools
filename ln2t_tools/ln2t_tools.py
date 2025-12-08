@@ -1727,7 +1727,12 @@ def main(args=None) -> None:
                     try:
                         # Check tool requirements
                         check_apptainer_is_installed("/usr/bin/apptainer")
-                        check_file_exists(args.fs_license)
+                        
+                        # Only check FreeSurfer license for tools that require it
+                        # CVRmap does not use FreeSurfer
+                        tools_requiring_fs_license = ["freesurfer", "fastsurfer", "fmriprep", "qsiprep", "qsirecon", "meld_graph"]
+                        if tool in tools_requiring_fs_license:
+                            check_file_exists(args.fs_license)
 
                         # If submitting to HPC, do not build a local image; instead
                         # ensure the required image exists on the HPC apptainer directory.
