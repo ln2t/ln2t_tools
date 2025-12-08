@@ -1411,6 +1411,12 @@ def main(args=None) -> None:
             handle_import(args)
             return
 
+        # Require --dataset for processing tools
+        if not args.dataset:
+            logger.error("--dataset is required. Please specify a dataset to process.")
+            logger.info("Use 'ln2t_tools --list-datasets' to see available datasets.")
+            return
+
         # Read processing configuration
         config_path = Path(DEFAULT_RAWDATA) / "processing_config.tsv"
         config_df = read_processing_config(config_path)
@@ -1419,10 +1425,7 @@ def main(args=None) -> None:
         datasets_to_process = get_datasets_to_process(config_df, args.dataset)
         
         if not datasets_to_process:
-            if args.dataset:
-                logger.error(f"Dataset '{args.dataset}' not found in config or rawdata directory")
-            else:
-                logger.error("No datasets found to process")
+            logger.error(f"Dataset '{args.dataset}' not found in config or rawdata directory")
             return
 
         # Collect all tools and participants for lock information
