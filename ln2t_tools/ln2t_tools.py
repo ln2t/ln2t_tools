@@ -897,7 +897,8 @@ def process_fmriprep_subject(
         output_spaces=getattr(args, 'output_spaces', "MNI152NLin2009cAsym:res-2"),
         nprocs=getattr(args, 'nprocs', 8),
         omp_nthreads=getattr(args, 'omp_nthreads', 8),
-        fs_subjects_dir=fs_output_dir
+        fs_subjects_dir=fs_output_dir,
+        version=args.version or DEFAULT_FMRIPREP_VERSION
     )
     launch_and_check(apptainer_cmd, "fMRIPrep", participant_label)
 

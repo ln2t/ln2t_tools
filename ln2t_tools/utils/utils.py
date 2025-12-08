@@ -452,6 +452,10 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             if fs_subjects_dir else ""
         )
         
+        # Add --use-aroma for fMRIPrep version 21.0.4 (required for CVRmap compatibility)
+        version = options.get('version', '')
+        aroma_option = "--use-aroma " if version == "21.0.4" else ""
+        
         return (
             f"apptainer run "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
@@ -465,6 +469,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"--nprocs {options.get('nprocs', 8)} "
             f"--omp-nthreads {options.get('omp_nthreads', 8)} "
             f"--fs-license-file /opt/freesurfer/license.txt "
+            f"{aroma_option}"
             f"{options.get('fs_no_reconall', '')} "
             f"{fs_subjects_dir_option}"
         )
