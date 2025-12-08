@@ -714,7 +714,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"-B {fmriprep_dir}:/fmriprep:ro",
             f"{options['apptainer_img']}",
             f"/data /derivatives/{options['output_label']} participant",
-            f"--participant_label {options['participant_label']}",
+            f"--participant-label {options['participant_label']}",
             f"--derivatives /fmriprep",
         ]
         
@@ -731,24 +731,24 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         # Add baseline method
         baseline_method = options.get('baseline_method', '')
         if baseline_method:
-            cmd_parts.append(f"--baseline_method {baseline_method}")
+            cmd_parts.append(f"--baseline-method {baseline_method}")
         
         # Add ROI probe options
         if options.get('roi_probe', False):
-            cmd_parts.append("--roi_probe")
+            cmd_parts.append("--roi-probe")
             
             roi_coordinates = options.get('roi_coordinates', '')
             if roi_coordinates:
-                cmd_parts.append(f"--roi_coordinates {roi_coordinates}")
+                cmd_parts.append(f"--roi-coordinates {roi_coordinates}")
             
             roi_radius = options.get('roi_radius', '')
             if roi_radius:
-                cmd_parts.append(f"--roi_radius {roi_radius}")
+                cmd_parts.append(f"--roi-radius {roi_radius}")
         
         # Add parallelization options
         n_jobs = options.get('n_jobs', 1)
         if n_jobs and n_jobs != 1:
-            cmd_parts.append(f"--n_jobs {n_jobs}")
+            cmd_parts.append(f"--n-jobs {n_jobs}")
         
         # Add config file if provided
         config = options.get('config', '')
