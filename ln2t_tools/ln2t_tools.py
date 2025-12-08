@@ -54,7 +54,8 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_QSIPREP_VERSION,
     DEFAULT_QSIRECON_VERSION,
     DEFAULT_MELDGRAPH_VERSION,
-    DEFAULT_MELD_FS_VERSION
+    DEFAULT_MELD_FS_VERSION,
+    DEFAULT_CVRMAP_VERSION
 )
 from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio, pre_import_physio
 from ln2t_tools.import_data.dicom import discover_participants_from_dicom_dir
@@ -526,6 +527,7 @@ def setup_directories(args) -> tuple[Path, Path, Path]:
               else DEFAULT_QSIPREP_VERSION if args.tool == 'qsiprep'
               else DEFAULT_QSIRECON_VERSION if args.tool == 'qsirecon'
               else DEFAULT_MELDGRAPH_VERSION if args.tool == 'meld_graph'
+              else DEFAULT_CVRMAP_VERSION if args.tool == 'cvrmap'
               else None)
     output_dir = dataset_derivatives / (args.output_label or 
                                       f"{args.tool}_{args.version or version}")
@@ -1534,7 +1536,8 @@ def main(args=None) -> None:
                                     DEFAULT_FMRIPREP_VERSION if args.tool == 'fmriprep' else \
                                     DEFAULT_QSIPREP_VERSION if args.tool == 'qsiprep' else \
                                     DEFAULT_QSIRECON_VERSION if args.tool == 'qsirecon' else \
-                                    DEFAULT_MELDGRAPH_VERSION if args.tool == 'meld_graph' else None
+                                    DEFAULT_MELDGRAPH_VERSION if args.tool == 'meld_graph' else \
+                                    DEFAULT_CVRMAP_VERSION if args.tool == 'cvrmap' else None
                     tools_to_run = {args.tool: getattr(args, 'version', None) or default_version}
                 else:
                     logger.warning(f"No tools specified for dataset {dataset}, skipping")
