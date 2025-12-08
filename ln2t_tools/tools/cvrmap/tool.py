@@ -16,7 +16,7 @@ from typing import List, Optional
 from bids import BIDSLayout
 
 from ln2t_tools.tools.base import BaseTool
-from ln2t_tools.utils.defaults import DEFAULT_CVRMAP_VERSION
+from ln2t_tools.utils.defaults import DEFAULT_CVRMAP_VERSION, DEFAULT_CVRMAP_FMRIPREP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +70,15 @@ Typical runtime: 10-30 minutes per subject
         parser.add_argument(
             "--task",
             type=str,
-            required=True,
-            help="Task name for CVR analysis (e.g., 'gas', 'breathhold', 'rest')"
+            default=None,
+            help="Task name for CVR analysis (e.g., 'gas', 'breathhold', 'rest'). "
+                 "If not specified, CVRmap will auto-discover available tasks."
         )
         parser.add_argument(
             "--fmriprep-version",
             type=str,
-            default=None,
-            help="fMRIPrep version to use as input (default: auto-detect)"
+            default=DEFAULT_CVRMAP_FMRIPREP_VERSION,
+            help=f"fMRIPrep version to use as input (default: {DEFAULT_CVRMAP_FMRIPREP_VERSION})"
         )
         parser.add_argument(
             "--space",
@@ -197,27 +198,32 @@ Typical runtime: 10-30 minutes per subject
         bool
             True if requirements are met
         """
-        # Check for fMRIPrep derivatives
-        # This is a simplified check - actual fMRIPrep path will be resolved at runtime
+        # Check for functional data (with specific task if provided)
         task = getattr(args, 'task', None)
-        if not task:
-            logger.error("--task is required for CVRmap")
-            return False
         
-        # Check for functional data with the specified task
-        bold_files = layout.get(
-            subject=participant_label,
-            task=task,
-            suffix='bold',
-            extension=['.nii', '.nii.gz'],
-            return_type='filename'
-        )
+        # Build query for BOLD files
+        query_params = {
+            'subject': participant_label,
+            'suffix': 'bold',
+            'extension': ['.nii', '.nii.gz'],
+            'return_type': 'filename'
+        }
+        
+        if task:
+            query_params['task'] = task
+        
+        bold_files = layout.get(**query_params)
         
         if not bold_files:
-            logger.warning(
-                f"No BOLD data found for participant {participant_label} "
-                f"with task '{task}'"
-            )
+            if task:
+                logger.warning(
+                    f"No BOLD data found for participant {participant_label} "
+                    f"with task '{task}'"
+                )
+            else:
+                logger.warning(
+                    f"No BOLD data found for participant {participant_label}"
+                )
             return False
         
         return True
@@ -300,12 +306,13 @@ Typical runtime: 10-30 minutes per subject
         output_label = args.output_label or f"cvrmap_{version}"
         
         # Find fMRIPrep derivatives directory
-        fmriprep_version = getattr(args, 'fmriprep_version', None)
+        fmriprep_version = getattr(args, 'fmriprep_version', DEFAULT_CVRMAP_FMRIPREP_VERSION)
         fmriprep_dir = cls._find_fmriprep_dir(dataset_derivatives, fmriprep_version)
         
         if not fmriprep_dir:
             logger.error(
                 f"fMRIPrep derivatives not found in {dataset_derivatives}. "
+                f"Expected fmriprep_{fmriprep_version}. "
                 "Please run fMRIPrep first or specify --fmriprep-version."
             )
             return []
@@ -321,7 +328,7 @@ Typical runtime: 10-30 minutes per subject
             apptainer_img=apptainer_img,
             output_label=output_label,
             fmriprep_dir=str(fmriprep_dir),
-            task=getattr(args, 'task', 'gas'),
+            task=getattr(args, 'task', None),  # None = CVRmap auto-discovers
             space=getattr(args, 'space', 'MNI152NLin2009cAsym'),
             baseline_method=getattr(args, 'baseline_method', 'peakutils'),
             n_jobs=getattr(args, 'n_jobs', -1),
@@ -400,7 +407,11 @@ Typical runtime: 10-30 minutes per subject
         try:
             cmd_str = cmd[0] if isinstance(cmd, list) and len(cmd) == 1 else ' '.join(cmd)
             logger.info(f"Running CVRmap for participant {participant_label}")
-            logger.info(f"Task: {args.task}")
+            task = getattr(args, 'task', None)
+            if task:
+                logger.info(f"Task: {task}")
+            else:
+                logger.info("Task: auto-discover")
             logger.info(f"Space: {args.space}")
             launch_apptainer(cmd_str)
             return True

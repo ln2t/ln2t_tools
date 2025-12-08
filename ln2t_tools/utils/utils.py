@@ -706,10 +706,6 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         if not fmriprep_dir:
             raise ValueError("fmriprep_dir is required for CVRmap")
         
-        task = options.get('task', '')
-        if not task:
-            raise ValueError("task is required for CVRmap")
-        
         # Build base command
         cmd_parts = [
             f"apptainer run",
@@ -720,8 +716,12 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"/data /derivatives/{options['output_label']} participant",
             f"--participant_label {options['participant_label']}",
             f"--derivatives /fmriprep",
-            f"--task {task}",
         ]
+        
+        # Add task if specified (CVRmap auto-discovers if not provided)
+        task = options.get('task', '')
+        if task:
+            cmd_parts.append(f"--task {task}")
         
         # Add optional space specification
         space = options.get('space', '')
