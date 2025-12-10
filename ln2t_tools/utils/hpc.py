@@ -407,7 +407,7 @@ def prompt_apptainer_build(
     Returns
     -------
     bool
-        True if build job was submitted, False otherwise (user can re-run after build)
+        True if build job was submitted or image was pushed, False otherwise (user can re-run after build)
     """
     username = args.hpc_username
     hostname = args.hpc_hostname
@@ -420,6 +420,11 @@ def prompt_apptainer_build(
     remote_path = f"{hpc_apptainer_dir}/{image_name}"
     docker_uri = f"docker://{tool_owner}/{tool}:{version}"
     
+    # Check if local image exists
+    local_apptainer_dir = Path(getattr(args, 'apptainer_dir', '/opt/apptainer'))
+    local_image_path = local_apptainer_dir / image_name
+    local_image_exists = local_image_path.exists()
+    
     print("\n" + "="*70)
     print("⚠️  MISSING APPTAINER IMAGE ON HPC")
     print("="*70)
@@ -428,13 +433,70 @@ def prompt_apptainer_build(
     print(f"  Version: {version}")
     print(f"  Expected path: {remote_path}")
     print("")
-    print("Building Apptainer images can be memory-intensive and may fail in")
-    print("interactive sessions. We recommend submitting a batch job to build it.")
-    print("")
     
-    response = input("Would you like to submit a job to build the image? [y/N]: ").strip().lower()
+    # Show options based on whether local image exists
+    if local_image_exists:
+        print("Options:")
+        print("  [1] Push local image to HPC (recommended - faster)")
+        print(f"      Local image found: {local_image_path}")
+        print("  [2] Submit a batch job to build the image on HPC")
+        print("  [3] Cancel and build manually")
+        print("")
+        response = input("Choose an option [1/2/3]: ").strip()
+    else:
+        print("Building Apptainer images can be memory-intensive and may fail in")
+        print("interactive sessions. We recommend submitting a batch job to build it.")
+        print("")
+        response = input("Would you like to submit a job to build the image? [y/N]: ").strip().lower()
+        # Map y/n to 2/3 for unified handling
+        if response == 'y':
+            response = '2'
+        else:
+            response = '3'
     
-    # Generate the build script
+    # Option 1: Push local image to HPC
+    if response == '1' and local_image_exists:
+        print(f"\nPushing local image to HPC...")
+        print(f"  Source: {local_image_path}")
+        print(f"  Destination: {username}@{hostname}:{remote_path}")
+        print("")
+        print("This may take a while depending on the image size and network speed...")
+        
+        try:
+            # Create remote directory if it doesn't exist
+            ssh_cmd = get_ssh_command(username, hostname, keyfile, gateway) + [f"mkdir -p {hpc_apptainer_dir}"]
+            subprocess.run(ssh_cmd, check=True, capture_output=True)
+            
+            # Push the image using scp
+            scp_cmd = get_scp_command(username, hostname, keyfile, gateway) + [
+                str(local_image_path), f"{username}@{hostname}:{remote_path}"
+            ]
+            result = subprocess.run(scp_cmd, capture_output=False)
+            
+            if result.returncode == 0:
+                print("\n" + "="*70)
+                print("✓ IMAGE PUSHED SUCCESSFULLY")
+                print("="*70)
+                print(f"\n  Image now available at: {remote_path}")
+                print("")
+                print("You can now re-run your original command.")
+                print("="*70 + "\n")
+                return True
+            else:
+                print(f"\n✗ Failed to push image (exit code {result.returncode})")
+                print("Falling back to manual instructions...")
+                response = '3'
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to push image: {e}")
+            print(f"\n✗ Failed to push image. Error: {e.stderr if hasattr(e, 'stderr') else e}")
+            response = '3'
+        except Exception as e:
+            logger.error(f"Error pushing image: {e}")
+            print(f"\n✗ Error: {e}")
+            response = '3'
+    
+    # Generate the build script (needed for options 2 and 3)
     script_content = generate_apptainer_build_script(
         tool=tool,
         version=version,
@@ -447,7 +509,8 @@ def prompt_apptainer_build(
     code_dir.mkdir(parents=True, exist_ok=True)
     local_script_path = code_dir / f"build_apptainer_{tool}_{version.replace('.', '_')}.sh"
     
-    if response == 'y':
+    # Option 2: Submit build job
+    if response == '2':
         # Submit the job
         print(f"\nSubmitting Apptainer build job...")
         
@@ -510,14 +573,15 @@ def prompt_apptainer_build(
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to submit build job: {e}")
             print(f"\n✗ Failed to submit job. Error: {e.stderr if hasattr(e, 'stderr') else e}")
-            # Fall through to save script locally
-            response = 'n'
+            # Fall through to manual instructions
+            response = '3'
         except Exception as e:
             logger.error(f"Error submitting build job: {e}")
             print(f"\n✗ Error: {e}")
-            response = 'n'
+            response = '3'
     
-    # User declined or submission failed - save script locally
+    # Option 3: Manual instructions (or fallback from failed options)
+    # Save script locally
     with open(local_script_path, 'w') as f:
         f.write(script_content)
     
@@ -527,7 +591,19 @@ def prompt_apptainer_build(
     print(f"\nThe SLURM job script has been saved to:")
     print(f"  {local_script_path}")
     print("")
-    print("To submit the build job manually:")
+    
+    # If local image exists, show push option in manual instructions
+    if local_image_exists:
+        print("Option A - Push local image:")
+        scp_opts = f"-i {keyfile}"
+        if gateway:
+            scp_opts += f" -o ProxyJump={username}@{gateway}"
+        print(f"  scp {scp_opts} {local_image_path} {username}@{hostname}:{remote_path}")
+        print("")
+        print("Option B - Submit build job:")
+    else:
+        print("To submit the build job manually:")
+    
     print("")
     print(f"  1. Copy the script to the HPC:")
     
