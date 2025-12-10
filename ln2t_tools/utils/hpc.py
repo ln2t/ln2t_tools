@@ -887,21 +887,22 @@ def check_required_data(tool: str, dataset: str, participant_label: str, args: A
         hpc_derivatives_check = hpc_derivatives
     
     # For environment variable paths, we need to resolve them via SSH
+    # Use login shell (-l) to ensure environment variables like $GLOBALSCRATCH are set
     if hpc_rawdata_check.startswith('$'):
         cmd = get_ssh_command(username, hostname, keyfile, gateway) + [
-            f"echo {hpc_rawdata_check}"
+            f"bash -l -c 'echo {hpc_rawdata_check}'"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            hpc_rawdata_check = result.stdout.strip()
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            hpc_rawdata_check = result.stdout.strip().split('\n')[-1]  # Take last line (skip any shell init output)
     
     if hpc_derivatives_check.startswith('$'):
         cmd = get_ssh_command(username, hostname, keyfile, gateway) + [
-            f"echo {hpc_derivatives_check}"
+            f"bash -l -c 'echo {hpc_derivatives_check}'"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            hpc_derivatives_check = result.stdout.strip()
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            hpc_derivatives_check = result.stdout.strip().split('\n')[-1]  # Take last line (skip any shell init output)
     
     # Check rawdata
     rawdata_path = f"{hpc_rawdata_check}/{dataset}-rawdata"
