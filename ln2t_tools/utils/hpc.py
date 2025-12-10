@@ -1669,23 +1669,28 @@ def print_download_command(tool: str, dataset: str, args: Any, job_ids: List[str
     gateway = getattr(args, 'hpc_gateway', None)
     hpc_derivatives = getattr(args, 'hpc_derivatives', None) or '$GLOBALSCRATCH/derivatives'
     
+    # Resolve environment variables in the path
+    hpc_derivatives = resolve_hpc_env_var(hpc_derivatives, username, hostname, keyfile, gateway)
+    
     # Determine version and output directory
     version = getattr(args, 'version', {
         'freesurfer': '7.3.2',
         'fmriprep': '25.1.4',
         'qsiprep': '1.0.1',
         'qsirecon': '1.1.1',
-        'meld_graph': 'v2.2.3'
+        'meld_graph': 'v2.2.3',
+        'cvrmap': '4.3.0'
     }.get(tool, ''))
     
     remote_path = f"{hpc_derivatives}/{dataset}-derivatives/{tool}_{version}/"
     local_path = f"~/derivatives/{dataset}-derivatives/{tool}_{version}/"
     
-    # Build rsync command
+    # Build rsync command with actual keyfile path
+    keyfile_expanded = str(Path(keyfile).expanduser())
     if gateway:
-        proxy_cmd = f"-e 'ssh -i {keyfile} -J {username}@{gateway}'"
+        proxy_cmd = f"-e 'ssh -i {keyfile_expanded} -J {username}@{gateway}'"
     else:
-        proxy_cmd = f"-e 'ssh -i {keyfile}'"
+        proxy_cmd = f"-e 'ssh -i {keyfile_expanded}'"
     
     rsync_cmd = f"rsync -avz --progress {proxy_cmd} {username}@{hostname}:{remote_path} {local_path}"
     
