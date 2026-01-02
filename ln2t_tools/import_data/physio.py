@@ -883,7 +883,8 @@ def pre_import_physio(
     session: Optional[str] = None,
     backup_dir: Optional[Path] = None,
     tolerance_hours: float = 1.0,
-    dry_run: bool = False
+    dry_run: bool = False,
+    physio_config: Optional[Path] = None
 ) -> bool:
     """Pre-import physio data: gather physio files from scanner backup location.
     
@@ -891,6 +892,11 @@ def pre_import_physio(
     1. For each participant, finds their DICOM data to extract exam metadata
     2. Uses the exam datetime to find matching physio files in the backup directory
     3. Copies all found physio files to {sourcedata_dir}/physio/{ds_initials}{participant}
+    
+    Time tolerance for matching can be customized via physio config file:
+    - PhysioTimeTolerance: numeric value
+    - PhysioTimeToleranceUnits: 's', 'min', or 'h'
+    If config file is found and these fields are present, they override the tolerance_hours parameter.
     
     Parameters
     ----------
@@ -907,9 +913,12 @@ def pre_import_physio(
     backup_dir : Optional[Path]
         Path to physio backup directory. Defaults to DEFAULT_PHYSIO_BACKUP_DIR
     tolerance_hours : float
-        Time tolerance in hours for matching physio files by datetime
+        Time tolerance in hours for matching physio files by datetime.
+        Can be overridden by config file if present.
     dry_run : bool
         If True, only report what would be done without copying files
+    physio_config : Optional[Path]
+        Path to physio configuration file (overrides auto-detection)
         
     Returns
     -------
@@ -922,6 +931,21 @@ def pre_import_physio(
     # Set default path
     if backup_dir is None:
         backup_dir = DEFAULT_PHYSIO_BACKUP_DIR
+    
+    # Try to load config file for custom tolerance settings
+    config = None
+    try:
+        from ln2t_tools.import_data.physio_inhouse import load_physio_config, get_physio_time_tolerance
+        config = load_physio_config(physio_config, sourcedata_dir)
+        # Override tolerance_hours if config specifies a custom tolerance
+        tolerance_hours = get_physio_time_tolerance(config)
+    except FileNotFoundError:
+        # Config not required for pre-import; use passed-in or default tolerance
+        logger.info(
+            f"Physio config file not found. Using tolerance_hours parameter: {tolerance_hours} hour(s)"
+        )
+    except Exception as e:
+        logger.warning(f"Could not load physio config: {e}. Using tolerance_hours parameter: {tolerance_hours} hour(s)")
     
     logger.info(f"{'[DRY RUN] ' if dry_run else ''}Physio Pre-import")
     logger.info(f"  Dataset: {dataset}")

@@ -1033,7 +1033,9 @@ Create a JSON configuration file with the following format:
     "task-motor_run-01": 3,
     "task-motor_run-02": 4,
     "_comment": "Specify dummy volumes for each task/run"
-  }
+  },
+  "PhysioTimeTolerance": 1,
+  "PhysioTimeToleranceUnits": "h"
 }
 ```
 
@@ -1056,6 +1058,17 @@ Example: If TR=2.0s and DummyVolumes=5:
 ```
 StartTime = -(30s + (2.0s × 5)) = -40.0s
 ```
+
+**PhysioTimeTolerance & PhysioTimeToleranceUnits** (Optional):
+- Used during **pre-import** to match physio files to exam start time
+- Default if not specified: 1 hour
+- `PhysioTimeTolerance`: Numeric value
+- `PhysioTimeToleranceUnits`: One of:
+  - `"s"` for seconds
+  - `"min"` for minutes  
+  - `"h"` for hours (default)
+- Example: `"PhysioTimeTolerance": 2, "PhysioTimeToleranceUnits": "h"` for 2-hour tolerance
+- If config file is present and these fields are defined, they will be used; otherwise, default 1 hour is applied with a warning
 
 See `example_physio_config.json` for a template.
 

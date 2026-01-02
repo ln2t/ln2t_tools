@@ -23,6 +23,79 @@ SAMPLING_FREQUENCIES = {
     'PPG': 100.0    # PPG (cardiac) at 100Hz
 }
 
+# Default time tolerance for physio pre-import matching
+DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS = 1.0
+
+
+def parse_physio_time_tolerance(tolerance_value: float, tolerance_units: str) -> float:
+    """Convert physio time tolerance from config units to seconds.
+    
+    Parameters
+    ----------
+    tolerance_value : float
+        Numeric tolerance value
+    tolerance_units : str
+        Units: 's' (seconds), 'min' (minutes), or 'h' (hours)
+        
+    Returns
+    -------
+    float
+        Tolerance in seconds
+        
+    Raises
+    ------
+    ValueError
+        If tolerance_units is not recognized
+    """
+    units_map = {
+        's': 1.0,           # seconds
+        'min': 60.0,        # minutes
+        'h': 3600.0         # hours
+    }
+    
+    if tolerance_units not in units_map:
+        raise ValueError(
+            f"Invalid PhysioTimeToleranceUnits: '{tolerance_units}'. "
+            f"Must be one of: {', '.join(units_map.keys())}"
+        )
+    
+    return tolerance_value * units_map[tolerance_units]
+
+
+def get_physio_time_tolerance(config: Dict) -> float:
+    """Get physio time tolerance from config, with verbose logging.
+    
+    Parameters
+    ----------
+    config : Dict
+        Configuration dictionary from load_physio_config()
+        
+    Returns
+    -------
+    float
+        Tolerance in hours (for backward compatibility with existing code)
+    """
+    tolerance_value = config.get('PhysioTimeTolerance')
+    tolerance_units = config.get('PhysioTimeToleranceUnits', 'h')
+    
+    if tolerance_value is None:
+        logger.warning(
+            f"PhysioTimeTolerance not found in config. "
+            f"Using default: {DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS} hour(s)"
+        )
+        return DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS
+    
+    # Parse tolerance in seconds, then convert to hours for backward compatibility
+    tolerance_seconds = parse_physio_time_tolerance(tolerance_value, tolerance_units)
+    tolerance_hours = tolerance_seconds / 3600.0
+    
+    logger.info(
+        f"PhysioTimeTolerance from config: {tolerance_value} {tolerance_units} "
+        f"({tolerance_seconds:.1f} seconds, {tolerance_hours:.3f} hours)"
+    )
+    
+    return tolerance_hours
+
 
 def load_physio_config(config_path: Optional[Path] = None, sourcedata_dir: Optional[Path] = None) -> Dict:
     """Load physiological data configuration.

@@ -367,13 +367,17 @@ The tool searches for config files in this priority order:
     "task-breathhold": 6,
     "_comment": "Specify DummyVolumes (dummy scans) for each task/run"
   },
+  "PhysioTimeTolerance": 1.5,
+  "PhysioTimeToleranceUnits": "h",
   "_description": {
-    "DummyVolumes": "Map of task-specific dummy volumes. Keys should match BIDS naming: 'task-<taskname>' or 'task-<taskname>_run-<runnum>'"
+    "DummyVolumes": "Map of task-specific dummy volumes. Keys should match BIDS naming: 'task-<taskname>' or 'task-<taskname>_run-<runnum>'",
+    "PhysioTimeTolerance": "Time tolerance for matching physio files to exam start during pre-import (optional)",
+    "PhysioTimeToleranceUnits": "Units for PhysioTimeTolerance: 's' (seconds), 'min' (minutes), or 'h' (hours, default)"
   }
 }
 ```
 
-**Key Field**:
+**Key Fields**:
 - `DummyVolumes`: Dictionary mapping task identifiers to dummy volume counts
   - Keys format: `"task-<taskname>"` or `"task-<taskname>_run-<runnum>"`
   - Values: Integer count of dummy volumes for that task/run
@@ -381,6 +385,16 @@ The tool searches for config files in this priority order:
     1. `task-{task}_run-{run}` (if run exists)
     2. `task-{task}`
   - **Required**: All tasks/runs in your dataset must be defined
+
+- `PhysioTimeTolerance` (Optional): Time tolerance value for matching physio files to exam start time
+  - Used during **pre-import** phase
+  - Numeric value (positive number)
+  - If not specified, default is 1 hour with a warning message
+
+- `PhysioTimeToleranceUnits` (Optional): Units for PhysioTimeTolerance
+  - One of: `"s"` (seconds), `"min"` (minutes), `"h"` (hours)
+  - Default if not specified: `"h"` (hours)
+  - Example: `"PhysioTimeTolerance": 2, "PhysioTimeToleranceUnits": "min"` means 2 minutes
 
 **Example Scenario**:
 If TR=2s (repetition time) and DummyVolumes=5:
@@ -401,6 +415,7 @@ This means physiological recording started 40 seconds before the first fMRI volu
 **Error Handling**:
 - If a task in the physio data is not found in the DummyVolumes config, the import will fail with a clear error message
 - Ensure all task names in your fMRI data are included in the configuration
+- If PhysioTimeToleranceUnits is invalid, pre-import will fail with a clear error message
 
 ---
 

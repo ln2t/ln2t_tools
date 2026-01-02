@@ -346,7 +346,8 @@ def handle_import(args):
                 session=getattr(args, 'session', None),
                 backup_dir=getattr(args, 'physio_backup_dir', None),
                 tolerance_hours=getattr(args, 'tolerance_hours', 1.0),
-                dry_run=getattr(args, 'dry_run', False)
+                dry_run=getattr(args, 'dry_run', False),
+                physio_config=getattr(args, 'physio_config', None)
             )
             
             if pre_import_success:
