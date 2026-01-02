@@ -114,7 +114,7 @@ def start_ssh_control_master(username: str, hostname: str, keyfile: str, gateway
         # Check if it's still running (didn't fail immediately)
         if _ssh_control_process.poll() is not None:
             stderr = _ssh_control_process.stderr.read().decode() if _ssh_control_process.stderr else ""
-            logger.error(f"SSH ControlMaster failed to start: {stderr}")
+            logger.warning(f"SSH ControlMaster failed to start: {stderr}")
             _ssh_control_process = None
             return False
         
@@ -1358,6 +1358,7 @@ apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/derivatives" \\
     -B "$FMRIPREP_DIR:/fmriprep:ro" \\
+    --cleanenv \\
     {apptainer_img} \\
     /data /derivatives participant \\
     --participant-label {participant_label} \\

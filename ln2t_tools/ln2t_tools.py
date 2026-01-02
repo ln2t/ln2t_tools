@@ -52,6 +52,7 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_FS_VERSION,
     DEFAULT_FASTSURFER_VERSION,
     DEFAULT_FMRIPREP_VERSION,
+    DEFAULT_FMRIPREP_FS_VERSION,
     DEFAULT_QSIPREP_VERSION,
     DEFAULT_QSIRECON_VERSION,
     DEFAULT_MELDGRAPH_VERSION,
@@ -857,7 +858,7 @@ def process_fmriprep_subject(
     fs_output_dir = get_freesurfer_output(
         derivatives_dir=dataset_derivatives,
         participant_label=participant_label,
-        version=DEFAULT_FS_VERSION,
+        version=DEFAULT_FMRIPREP_FS_VERSION,
         session=entities.get('session'),
         run=entities.get('run')
     )
@@ -1975,6 +1976,12 @@ def main(args=None) -> None:
             if 'instance_manager' in locals():
                 instance_manager.release_instance_lock()
         except:
+            pass
+        # Ensure SSH ControlMaster is stopped to avoid idle background processes
+        try:
+            from ln2t_tools.utils.hpc import stop_ssh_control_master
+            stop_ssh_control_master()
+        except Exception:
             pass
 
 if __name__ == "__main__":
