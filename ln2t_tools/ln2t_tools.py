@@ -917,10 +917,15 @@ def process_qsiprep_subject(
     Args:
         layout: BIDSLayout object for BIDS dataset
         participant_label: Subject ID without 'sub-' prefix
-        args: Parsed command line arguments
+        args: Parsed command line arguments (tool-specific options via --tool-args)
         dataset_rawdata: Path to BIDS rawdata directory
         dataset_derivatives: Path to derivatives directory
         apptainer_img: Path to Apptainer image
+    
+    Note:
+        QSIPrep-specific options (--output-resolution, --denoise-method, etc.)
+        should be passed via --tool-args. Example:
+            --tool-args "--output-resolution 2.0 --denoise-method dwidenoise"
     """
     # Check for required DWI data
     dwi_files = layout.get(
@@ -935,22 +940,6 @@ def process_qsiprep_subject(
         logger.warning(f"No DWI data found for participant {participant_label}")
         return
 
-    # Check for anatomical data unless dwi-only is specified
-    if not getattr(args, 'dwi_only', False):
-        t1w_files = layout.get(
-            subject=participant_label,
-            scope="raw",
-            suffix="T1w",
-            extension=".nii.gz",
-            return_type="filename"
-        )
-        
-        if not t1w_files:
-            logger.warning(f"No T1w images found for participant {participant_label}")
-            if not getattr(args, 'anat_only', False):
-                logger.info("Consider using --dwi-only flag for DWI-only processing")
-                return
-
     # Build output directory path
     output_subdir = build_bids_subdir(participant_label)
     output_participant_dir = dataset_derivatives / (
@@ -962,12 +951,8 @@ def process_qsiprep_subject(
         logger.info(f"Output exists, skipping: {output_participant_dir}")
         return
 
-    # Validate required arguments for QSIPrep
-    if not getattr(args, 'output_resolution', None):
-        logger.error("--output-resolution is required for QSIPrep")
-        return
-
     # Build and launch QSIPrep command
+    # Tool-specific options (--output-resolution, etc.) are passed via --tool-args
     output_dir = dataset_derivatives / (args.output_label or f"qsiprep_{args.version or DEFAULT_QSIPREP_VERSION}")
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -978,12 +963,7 @@ def process_qsiprep_subject(
         derivatives=str(output_dir),
         participant_label=participant_label,
         apptainer_img=apptainer_img,
-        output_resolution=getattr(args, 'output_resolution'),
-        denoise_method=getattr(args, 'denoise_method', 'dwidenoise'),
-        dwi_only="--dwi-only" if getattr(args, 'dwi_only', False) else "",
-        anat_only="--anat-only" if getattr(args, 'anat_only', False) else "",
-        nprocs=getattr(args, 'nprocs', 8),
-        omp_nthreads=getattr(args, 'omp_nthreads', 8)
+        tool_args=getattr(args, 'tool_args', '')
     )
     launch_and_check(apptainer_cmd, "QSIPrep", participant_label)
 

@@ -111,10 +111,8 @@ _ln2t_tools_completion() {
                 opts+=" --seg-only --surf-only --3T --threads --device --vox-size --no-cereb --no-hypothal --no-biasfield --t2"
             fi
             
-            # Add QSIPrep specific options
-            if [[ ${words[1]} == "qsiprep" ]]; then
-                opts+=" --output-resolution --denoise-method --dwi-only --anat-only --nprocs --omp-nthreads"
-            fi
+            # QSIPrep options are passed via --tool-args
+            # (no tool-specific CLI options)
             
             # Add QSIRecon specific options
             if [[ ${words[1]} == "qsirecon" ]]; then

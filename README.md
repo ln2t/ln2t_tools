@@ -365,16 +365,20 @@ QSIPrep performs preprocessing of diffusion MRI data.
 - **Version**: `1.0.1`
 - **Output directory**: `~/derivatives/{dataset}-derivatives/qsiprep_1.0.1/`
 - **Container**: `pennlinc/qsiprep:1.0.1`
-- **Denoise method**: `dwidenoise`
 
 #### Basic Usage
 
+QSIPrep-specific options must be passed via `--tool-args`. The `--output-resolution`
+option is required by QSIPrep.
+
 ```bash
-# Process single participant (requires --output-resolution)
-ln2t_tools qsiprep --dataset mydataset --participant-label 01 --output-resolution 1.25
+# Process single participant (--output-resolution is required)
+ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
+  --tool-args "--output-resolution 1.25"
 
 # Process multiple participants
-ln2t_tools qsiprep --dataset mydataset --participant-label 01 02 03 --output-resolution 1.5
+ln2t_tools qsiprep --dataset mydataset --participant-label 01 02 03 \
+  --tool-args "--output-resolution 1.5"
 ```
 
 #### Advanced Options
@@ -382,32 +386,36 @@ ln2t_tools qsiprep --dataset mydataset --participant-label 01 02 03 --output-res
 ```bash
 # Use specific version
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --version 0.24.0 --output-resolution 1.25
+  --version 0.24.0 --tool-args "--output-resolution 1.25"
 
 # Different denoising methods
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --output-resolution 1.25 --denoise-method patch2self
+  --tool-args "--output-resolution 1.25 --denoise-method patch2self"
 
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --output-resolution 1.25 --denoise-method none
+  --tool-args "--output-resolution 1.25 --denoise-method none"
 
 # DWI-only processing (skip anatomical)
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --output-resolution 1.25 --dwi-only
+  --tool-args "--output-resolution 1.25 --dwi-only"
 
 # Anatomical-only processing
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
-  --output-resolution 1.25 --anat-only
+  --tool-args "--output-resolution 1.25 --anat-only"
 
 # Full example with multiple options
 ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
   --version 1.0.1 \
-  --output-resolution 1.5 \
-  --denoise-method dwidenoise
+  --tool-args "--output-resolution 1.5 --denoise-method dwidenoise"
 ```
 
-**Required Options**:
-- `--output-resolution`: Isotropic voxel size in mm (e.g., 1.25, 1.5, 2.0)
+**Common QSIPrep Options** (pass via `--tool-args`):
+- `--output-resolution <mm>`: Isotropic voxel size in mm (REQUIRED, e.g., 1.25, 1.5, 2.0)
+- `--denoise-method <method>`: dwidenoise, patch2self, or none
+- `--dwi-only`: Process only DWI data (skip anatomical)
+- `--anat-only`: Process only anatomical data
+- `--nprocs <n>`: Number of processes
+- `--omp-nthreads <n>`: Number of OpenMP threads
 
 **Notes**:
 - QSIPrep automatically skips BIDS validation
@@ -1181,7 +1189,7 @@ ln2t_tools freesurfer --dataset mydataset --participant-label <TAB>
 
 # Tab shows tool-specific options
 ln2t_tools qsiprep --<TAB>
-# → --output-resolution --denoise-method --dwi-only --anat-only
+# → --tool-args (QSIPrep options passed via --tool-args)
 
 ln2t_tools qsirecon --<TAB>
 # → --qsiprep-version --recon-spec
@@ -1200,8 +1208,9 @@ ln2t_tools freesurfer --dataset mydataset --participant-label 01
 # 2. Run fMRIPrep (uses FreeSurfer output)
 ln2t_tools fmriprep --dataset mydataset --participant-label 01
 
-# 3. Run QSIPrep  
-ln2t_tools qsiprep --dataset mydataset --participant-label 01 --output-resolution 1.25
+# 3. Run QSIPrep (--output-resolution required via --tool-args)
+ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
+  --tool-args "--output-resolution 1.25"
 
 # 4. Run QSIRecon (uses QSIPrep output)
 ln2t_tools qsirecon --dataset mydataset --participant-label 01
@@ -1274,7 +1283,8 @@ ln2t_tools --max-instances 15 --dataset mydataset
 For QSIRecon or MELD Graph, ensure prerequisite tools have been run first:
 ```bash
 # QSIRecon needs QSIPrep
-ln2t_tools qsiprep --dataset mydataset --participant-label 01 --output-resolution 1.25
+ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
+  --tool-args "--output-resolution 1.25"
 ln2t_tools qsirecon --dataset mydataset --participant-label 01
 
 # MELD Graph needs FreeSurfer
