@@ -1344,23 +1344,28 @@ apptainer exec {gpu_flag} \\
         
         version = getattr(args, 'version', '4.3.1')
         apptainer_img = f"{hpc_apptainer_dir}/ln2t.cvrmap.{version}.sif"
-        output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/cvrmap_{version}"
+        # Bind the full derivatives directory (not just cvrmap output) so that
+        # files in other subdirectories (e.g., vesseldensitymaps) are accessible
+        # via /derivatives/ paths in --tool-args
+        derivatives_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives"
+        output_label = f"cvrmap_{version}"
         fmriprep_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/fmriprep_{DEFAULT_CVRMAP_FMRIPREP_VERSION}"
         
         script += f"""
 # CVRmap setup
-OUTPUT_DIR="{output_dir}"
+DERIVATIVES_DIR="{derivatives_dir}"
+OUTPUT_LABEL="{output_label}"
 FMRIPREP_DIR="{fmriprep_dir}"
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$DERIVATIVES_DIR/$OUTPUT_LABEL"
 
 # Run CVRmap
 apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
-    -B "$OUTPUT_DIR:/derivatives" \\
+    -B "$DERIVATIVES_DIR:/derivatives" \\
     -B "$FMRIPREP_DIR:/fmriprep:ro" \\
     --cleanenv \\
     {apptainer_img} \\
-    /data /derivatives participant \\
+    /data /derivatives/$OUTPUT_LABEL participant \\
     --participant-label {participant_label} \\
     --derivatives fmriprep=/fmriprep \\
     $TOOL_ARGS

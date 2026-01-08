@@ -876,15 +876,16 @@ def process_fmriprep_subject(
         return
 
     # If FreeSurfer output exists, use it
-    if fs_output_dir and not args.fs_no_reconall:
+    # Note: fs_no_reconall can be passed via --tool-args if needed
+    if fs_output_dir and not getattr(args, 'fs_no_reconall', False):
         logger.info(f"Using existing FreeSurfer output: {fs_output_dir}")
-        fs_no_reconall = "--fs-no-reconall"
+        fs_subjects_dir = fs_output_dir
     else:
         logger.info("No existing FreeSurfer output found, will run reconstruction")
-        fs_no_reconall = ""
-        fs_output_dir = None
+        fs_subjects_dir = None
 
     # Build and launch fMRIPrep command
+    # Tool-specific options (--output-spaces, --nprocs, etc.) are passed via --tool-args
     output_dir = dataset_derivatives / (args.output_label or f"fmriprep_{args.version or DEFAULT_FMRIPREP_VERSION}")
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -895,12 +896,8 @@ def process_fmriprep_subject(
         derivatives=str(output_dir),
         participant_label=participant_label,
         apptainer_img=apptainer_img,
-        fs_no_reconall=fs_no_reconall,
-        output_spaces=getattr(args, 'output_spaces', "MNI152NLin2009cAsym:res-2"),
-        nprocs=getattr(args, 'nprocs', 8),
-        omp_nthreads=getattr(args, 'omp_nthreads', 8),
-        fs_subjects_dir=fs_output_dir,
-        version=args.version or DEFAULT_FMRIPREP_VERSION
+        fs_subjects_dir=fs_subjects_dir,
+        tool_args=getattr(args, 'tool_args', '')
     )
     launch_and_check(apptainer_cmd, "fMRIPrep", participant_label)
 

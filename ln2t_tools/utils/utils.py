@@ -461,15 +461,27 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         if "fs_license" not in options:
             raise ValueError("FreeSurfer license file path is required")
         
+        # Build bindings
+        bindings = [
+            f"-B {options['fs_license']}:/opt/freesurfer/license.txt",
+            f"-B {options['rawdata']}:/data:ro",
+            f"-B {options['derivatives']}:/derivatives"
+        ]
+        
+        # Add FreeSurfer subjects directory binding if available
+        if options.get('fs_subjects_dir'):
+            bindings.append(f"-B {options['fs_subjects_dir']}:/fsdir:ro")
+            fs_flag = " --fs-no-reconall"
+        else:
+            fs_flag = ""
+        
         cmd = (
             f"apptainer run "
-            f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
-            f"-B {options['rawdata']}:/data:ro "
-            f"-B {options['derivatives']}:/derivatives "
+            f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
             f"/data /derivatives participant "
             f"--participant-label {options['participant_label']} "
-            f"--fs-license-file /opt/freesurfer/license.txt"
+            f"--fs-license-file /opt/freesurfer/license.txt{fs_flag}"
         )
         if tool_args:
             cmd += f" {tool_args}"
