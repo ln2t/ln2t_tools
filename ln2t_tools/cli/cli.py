@@ -145,8 +145,8 @@ def add_common_arguments(parser, exclude_participant_label=False):
         type=str,
         default="",
         help="Additional arguments passed directly to the tool container. "
-             "Use quotes to pass multiple arguments, e.g., "
-             '--tool-args "--output-resolution 2.0 --denoise-method dwidenoise". '
+             "Use quotes with equals sign or after --, e.g., "
+             '--tool-args="--json --ignoreWarnings" or -- --tool-args "--json". '
              "These arguments are appended verbatim to the container command. "
              "Refer to each tool's documentation for available options."
     )
