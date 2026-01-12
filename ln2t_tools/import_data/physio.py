@@ -31,7 +31,8 @@ def import_physio(
     compress_source: bool = False,
     use_phys2bids: bool = False,
     physio_config: Optional[Path] = None,
-    apptainer_dir: Path = Path("/opt/apptainer")
+    apptainer_dir: Path = Path("/opt/apptainer"),
+    matching_tolerance_sec: Optional[float] = None
 ) -> bool:
     """Import physiological data to BIDS format.
     
@@ -59,6 +60,9 @@ def import_physio(
         Path to physiological data configuration file (for in-house processing)
     apptainer_dir : Path
         Directory containing Apptainer images (for phys2bids only)
+    matching_tolerance_sec : Optional[float]
+        Time tolerance in seconds for matching physio recordings to fMRI runs.
+        If not provided, uses config value or default (35.0s).
         
     Returns
     -------
@@ -94,7 +98,8 @@ def import_physio(
             rawdata_dir=rawdata_dir,
             config=config,
             ds_initials=ds_initials,
-            session=session
+            session=session,
+            matching_tolerance_sec=matching_tolerance_sec
         )
 
 
@@ -935,23 +940,23 @@ def pre_import_physio(
     # Try to load config file for custom tolerance settings
     config = None
     try:
-        from ln2t_tools.import_data.physio_inhouse import load_physio_config, get_physio_time_tolerance
+        from ln2t_tools.import_data.physio_inhouse import load_physio_config, get_physio_pre_import_tolerance
         config = load_physio_config(physio_config, sourcedata_dir)
         # Override tolerance_hours if config specifies a custom tolerance
-        tolerance_hours = get_physio_time_tolerance(config)
+        tolerance_hours = get_physio_pre_import_tolerance(config)
     except FileNotFoundError:
         # Config not required for pre-import; use passed-in or default tolerance
         logger.info(
-            f"Physio config file not found. Using tolerance_hours parameter: {tolerance_hours} hour(s)"
+            f"Physio config file not found. Using pre_import_tolerance_hours parameter: {tolerance_hours} hour(s)"
         )
     except Exception as e:
-        logger.warning(f"Could not load physio config: {e}. Using tolerance_hours parameter: {tolerance_hours} hour(s)")
+        logger.warning(f"Could not load physio config: {e}. Using pre_import_tolerance_hours parameter: {tolerance_hours} hour(s)")
     
     logger.info(f"{'[DRY RUN] ' if dry_run else ''}Physio Pre-import")
     logger.info(f"  Dataset: {dataset}")
     logger.info(f"  Participants: {participant_labels}")
     logger.info(f"  Backup dir: {backup_dir}")
-    logger.info(f"  Tolerance: {tolerance_hours} hours")
+    logger.info(f"  Pre-import tolerance: {tolerance_hours} hours")
     
     # Check backup directory exists
     if not backup_dir.exists():

@@ -1,5 +1,68 @@
 # Physiological Data Processing Changes
 
+## Breaking Changes - Tolerance Configuration Refactoring
+
+### ⚠️ Tolerance Configuration Changed
+
+**Date**: January 12, 2026
+
+The physio configuration has been updated to distinguish between **two different tolerance values**:
+
+1. **Pre-import tolerance**: Used when finding physio files by exam datetime during the pre-import step
+2. **Matching tolerance**: Used when matching physio recordings to fMRI runs based on timestamps
+
+#### Old Format (DEPRECATED):
+```json
+{
+  "DummyVolumes": { ... },
+  "PhysioTimeTolerance": 1,
+  "PhysioTimeToleranceUnits": "h"
+}
+```
+
+**Old CLI argument**:
+```bash
+--tolerance-hours 1.0
+```
+
+#### New Format (RECOMMENDED):
+```json
+{
+  "DummyVolumes": { ... },
+  "PhysioPreImportTolerance": 1,
+  "PhysioPreImportToleranceUnits": "h",
+  "PhysioMatchingTolerance": 35,
+  "PhysioMatchingToleranceUnits": "s"
+}
+```
+
+**New CLI arguments**:
+```bash
+--pre-import-tolerance-hours 1.0    # For finding files during pre-import
+--matching-tolerance-sec 35.0       # For matching physio to fMRI runs
+```
+
+#### Migration Guide
+
+1. **Rename** `PhysioTimeTolerance` to `PhysioPreImportTolerance` in your config file
+2. **Rename** `PhysioTimeToleranceUnits` to `PhysioPreImportToleranceUnits`
+3. **Add** `PhysioMatchingTolerance` if you need custom matching tolerance (default: 35 seconds)
+4. **Add** `PhysioMatchingToleranceUnits` (default: 's' for seconds)
+5. **Update** CLI commands to use `--pre-import-tolerance-hours` instead of `--tolerance-hours`
+6. **Optionally add** `--matching-tolerance-sec` if default 35s is not appropriate
+
+#### Backward Compatibility
+
+The old field names (`PhysioTimeTolerance`, `PhysioTimeToleranceUnits`) are still recognized but will generate a deprecation warning. Please update your config files to use the new names.
+
+#### Understanding the Two Tolerances
+
+- **Pre-import tolerance** (`PhysioPreImportTolerance`): Controls how far in time from the exam datetime the system will look for physio files in the backup location. Default: 1 hour.
+
+- **Matching tolerance** (`PhysioMatchingTolerance`): Controls how close in time a physio recording must end relative to an fMRI run for them to be considered a match. Default: 35 seconds (accounts for GE's 30s pre-recording + timing variations).
+
+---
+
 ## Breaking Changes - DummyVolumes Configuration Refactoring
 
 ### ⚠️ Configuration File Format Changed

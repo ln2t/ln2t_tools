@@ -5,11 +5,15 @@
     "task-motor_run-02": 4,
     "_comment": "Specify DummyVolumes (dummy scans) for each task/run"
   },
-  "PhysioTimeTolerance": 1,
-  "PhysioTimeToleranceUnits": "h",
+  "PhysioPreImportTolerance": 1,
+  "PhysioPreImportToleranceUnits": "h",
+  "PhysioMatchingTolerance": 35,
+  "PhysioMatchingToleranceUnits": "s",
   "_description": {
     "DummyVolumes": "Map of task-specific dummy volumes. Keys should match BIDS naming: 'task-<taskname>' or 'task-<taskname>_run-<runnum>'. StartTime will be calculated as: -(30s + TR × DummyVolumes)",
-    "PhysioTimeTolerance": "Time tolerance for matching physio files to exam start time during pre-import. Must be a positive number.",
-    "PhysioTimeToleranceUnits": "Units for PhysioTimeTolerance: 's' (seconds), 'min' (minutes), or 'h' (hours). Default if not specified: 'h'"
+    "PhysioPreImportTolerance": "Time tolerance for finding physio files by exam datetime during pre-import step. Must be a positive number.",
+    "PhysioPreImportToleranceUnits": "Units for PhysioPreImportTolerance: 's' (seconds), 'min' (minutes), or 'h' (hours). Default if not specified: 'h'",
+    "PhysioMatchingTolerance": "Time tolerance in seconds for matching physio recordings to fMRI runs based on timestamps. GE physio starts 30s before fMRI, so 35s accounts for this offset plus small timing variations.",
+    "PhysioMatchingToleranceUnits": "Units for PhysioMatchingTolerance: 's' (seconds), 'min' (minutes), or 'h' (hours). Default if not specified: 's'"
   }
 }

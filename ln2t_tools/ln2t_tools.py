@@ -310,7 +310,7 @@ def handle_import(args):
                 session=getattr(args, 'session', None),
                 mrraw_dir=getattr(args, 'mrraw_dir', None),
                 tmp_dir=getattr(args, 'mrs_tmp_dir', None),
-                tolerance_hours=getattr(args, 'tolerance_hours', 1.0),
+                tolerance_hours=getattr(args, 'pre_import_tolerance_hours', 1.0),
                 dry_run=getattr(args, 'dry_run', False)
             )
             
@@ -345,7 +345,7 @@ def handle_import(args):
                 ds_initials=ds_initials,
                 session=getattr(args, 'session', None),
                 backup_dir=getattr(args, 'physio_backup_dir', None),
-                tolerance_hours=getattr(args, 'tolerance_hours', 1.0),
+                tolerance_hours=getattr(args, 'pre_import_tolerance_hours', 1.0),
                 dry_run=getattr(args, 'dry_run', False),
                 physio_config=getattr(args, 'physio_config', None)
             )
@@ -443,7 +443,8 @@ def handle_import(args):
                 compress_source=compress_source,
                 use_phys2bids=getattr(args, 'phys2bids', False),
                 physio_config=getattr(args, 'physio_config', None),
-                apptainer_dir=apptainer_dir
+                apptainer_dir=apptainer_dir,
+                matching_tolerance_sec=getattr(args, 'matching_tolerance_sec', None)
             )
     
     # Final summary

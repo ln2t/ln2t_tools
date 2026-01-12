@@ -23,12 +23,16 @@ SAMPLING_FREQUENCIES = {
     'PPG': 100.0    # PPG (cardiac) at 100Hz
 }
 
-# Default time tolerance for physio pre-import matching
-DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS = 1.0
+# Default time tolerance for physio pre-import matching (finding files by exam datetime)
+DEFAULT_PHYSIO_PRE_IMPORT_TOLERANCE_HOURS = 1.0
+
+# Default time tolerance for matching physio recordings to fMRI runs
+# GE physio recordings start 30s before fMRI acquisition, so 35s accounts for offset + timing variations
+DEFAULT_PHYSIO_MATCHING_TOLERANCE_SEC = 35.0
 
 
-def parse_physio_time_tolerance(tolerance_value: float, tolerance_units: str) -> float:
-    """Convert physio time tolerance from config units to seconds.
+def parse_physio_tolerance(tolerance_value: float, tolerance_units: str, param_name: str = "tolerance") -> float:
+    """Convert physio tolerance from config units to seconds.
     
     Parameters
     ----------
@@ -36,6 +40,8 @@ def parse_physio_time_tolerance(tolerance_value: float, tolerance_units: str) ->
         Numeric tolerance value
     tolerance_units : str
         Units: 's' (seconds), 'min' (minutes), or 'h' (hours)
+    param_name : str
+        Name of the parameter for error messages
         
     Returns
     -------
@@ -55,15 +61,17 @@ def parse_physio_time_tolerance(tolerance_value: float, tolerance_units: str) ->
     
     if tolerance_units not in units_map:
         raise ValueError(
-            f"Invalid PhysioTimeToleranceUnits: '{tolerance_units}'. "
+            f"Invalid units for {param_name}: '{tolerance_units}'. "
             f"Must be one of: {', '.join(units_map.keys())}"
         )
     
     return tolerance_value * units_map[tolerance_units]
 
 
-def get_physio_time_tolerance(config: Dict) -> float:
-    """Get physio time tolerance from config, with verbose logging.
+def get_physio_pre_import_tolerance(config: Dict) -> float:
+    """Get physio pre-import tolerance from config, with verbose logging.
+    
+    This tolerance is used for finding physio files by exam datetime during pre-import.
     
     Parameters
     ----------
@@ -75,26 +83,73 @@ def get_physio_time_tolerance(config: Dict) -> float:
     float
         Tolerance in hours (for backward compatibility with existing code)
     """
-    tolerance_value = config.get('PhysioTimeTolerance')
-    tolerance_units = config.get('PhysioTimeToleranceUnits', 'h')
+    # Try new field name first
+    tolerance_value = config.get('PhysioPreImportTolerance')
+    tolerance_units = config.get('PhysioPreImportToleranceUnits', 'h')
+    
+    # Fall back to legacy field names for backward compatibility
+    if tolerance_value is None:
+        tolerance_value = config.get('PhysioTimeTolerance')
+        tolerance_units = config.get('PhysioTimeToleranceUnits', 'h')
+        if tolerance_value is not None:
+            logger.warning(
+                "Using deprecated 'PhysioTimeTolerance' config field. "
+                "Please rename to 'PhysioPreImportTolerance' (see migration guide)."
+            )
     
     if tolerance_value is None:
         logger.warning(
-            f"PhysioTimeTolerance not found in config. "
-            f"Using default: {DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS} hour(s)"
+            f"PhysioPreImportTolerance not found in config. "
+            f"Using default: {DEFAULT_PHYSIO_PRE_IMPORT_TOLERANCE_HOURS} hour(s)"
         )
-        return DEFAULT_PHYSIO_TIME_TOLERANCE_HOURS
+        return DEFAULT_PHYSIO_PRE_IMPORT_TOLERANCE_HOURS
     
     # Parse tolerance in seconds, then convert to hours for backward compatibility
-    tolerance_seconds = parse_physio_time_tolerance(tolerance_value, tolerance_units)
+    tolerance_seconds = parse_physio_tolerance(tolerance_value, tolerance_units, "PhysioPreImportTolerance")
     tolerance_hours = tolerance_seconds / 3600.0
     
     logger.info(
-        f"PhysioTimeTolerance from config: {tolerance_value} {tolerance_units} "
+        f"PhysioPreImportTolerance from config: {tolerance_value} {tolerance_units} "
         f"({tolerance_seconds:.1f} seconds, {tolerance_hours:.3f} hours)"
     )
     
     return tolerance_hours
+
+
+def get_physio_matching_tolerance(config: Dict) -> float:
+    """Get physio matching tolerance from config, with verbose logging.
+    
+    This tolerance is used for matching physio recordings to fMRI runs based on timestamps.
+    
+    Parameters
+    ----------
+    config : Dict
+        Configuration dictionary from load_physio_config()
+        
+    Returns
+    -------
+    float
+        Tolerance in seconds
+    """
+    tolerance_value = config.get('PhysioMatchingTolerance')
+    tolerance_units = config.get('PhysioMatchingToleranceUnits', 's')
+    
+    if tolerance_value is None:
+        logger.info(
+            f"PhysioMatchingTolerance not found in config. "
+            f"Using default: {DEFAULT_PHYSIO_MATCHING_TOLERANCE_SEC} seconds"
+        )
+        return DEFAULT_PHYSIO_MATCHING_TOLERANCE_SEC
+    
+    # Parse tolerance to seconds
+    tolerance_seconds = parse_physio_tolerance(tolerance_value, tolerance_units, "PhysioMatchingTolerance")
+    
+    logger.info(
+        f"PhysioMatchingTolerance from config: {tolerance_value} {tolerance_units} "
+        f"({tolerance_seconds:.1f} seconds)"
+    )
+    
+    return tolerance_seconds
 
 
 def load_physio_config(config_path: Optional[Path] = None, sourcedata_dir: Optional[Path] = None) -> Dict:
@@ -349,6 +404,7 @@ def match_physio_to_fmri(
     
     logger.info(f"\n{'='*60}")
     logger.info("Matching physio files to fMRI runs")
+    logger.info(f"  Matching tolerance: {tolerance_sec} seconds")
     logger.info(f"{'='*60}")
     
     # Find all fMRI files
@@ -559,7 +615,8 @@ def import_physio_inhouse(
     rawdata_dir: Path,
     config: Dict,
     ds_initials: Optional[str] = None,
-    session: Optional[str] = None
+    session: Optional[str] = None,
+    matching_tolerance_sec: Optional[float] = None
 ) -> bool:
     """Import physiological data to BIDS format using in-house processing.
     
@@ -574,11 +631,15 @@ def import_physio_inhouse(
     rawdata_dir : Path
         Path to BIDS rawdata directory
     config : Dict
-        Configuration dictionary (must contain 'DummyVolumes' dict with task-specific values)
+        Configuration dictionary (must contain 'DummyVolumes' dict with task-specific values,
+        and optionally 'PhysioMatchingTolerance' for physio-to-fMRI matching)
     ds_initials : Optional[str]
         Dataset initials prefix
     session : Optional[str]
         Session label (without 'ses-' prefix)
+    matching_tolerance_sec : Optional[float]
+        Time tolerance in seconds for matching physio to fMRI runs.
+        If not provided, uses config value or default (35.0s).
         
     Returns
     -------
@@ -596,6 +657,12 @@ def import_physio_inhouse(
         return False
     
     logger.info(f"Found physio directory: {physio_dir}")
+    
+    # Get matching tolerance (CLI argument > config file > default)
+    if matching_tolerance_sec is None:
+        matching_tolerance_sec = get_physio_matching_tolerance(config)
+    else:
+        logger.info(f"PhysioMatchingTolerance from CLI: {matching_tolerance_sec} seconds")
     
     # Validate DummyVolumes configuration (task-specific)
     dummy_volumes_config = config.get('DummyVolumes', {})
@@ -688,7 +755,7 @@ def import_physio_inhouse(
             logger.info(f"  {pf['filename']} ({pf['signal_type']})")
         
         # Match physio files to fMRI runs
-        matches = match_physio_to_fmri(physio_files, func_dir)
+        matches = match_physio_to_fmri(physio_files, func_dir, tolerance_sec=matching_tolerance_sec)
         
         if not matches:
             logger.error("No matches found between physio and fMRI")
