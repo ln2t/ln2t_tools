@@ -623,14 +623,12 @@ def build_apptainer_cmd(tool: str, **options) -> str:
     
     elif tool == "bids_validator":
         # BIDS Validator for dataset validation
-        # The validator uses Deno which needs a writable cache directory
-        # Use --containall to isolate from host and provide /tmp for cache
         # The container's entrypoint runs: deno -A ./bids-validator.js
+        # Must set --pwd /src since bids-validator.js is in /src/ directory
         cmd = (
             f"apptainer run "
-            f"--containall "
+            f"--pwd /src "
             f"-B {options['rawdata']}:/data:ro "
-            f"--env DENO_DIR=/tmp/deno "
             f"{options['apptainer_img']} "
             f"/data"
         )
