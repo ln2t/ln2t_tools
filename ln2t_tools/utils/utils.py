@@ -244,6 +244,8 @@ def ensure_image_exists(
     elif tool == "bids_validator":
         tool_owner = "bids"
         tool = "validator"  # Docker image is bids/validator
+    elif tool == "mri2print":
+        tool_owner = "arovai"
     else:
         raise ValueError(f"Unsupported tool: {tool}")
     
@@ -631,6 +633,19 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"-B {options['rawdata']}:/data:ro "
             f"{options['apptainer_img']} "
             f"/data"
+        )
+        if tool_args:
+            cmd += f" {tool_args}"
+        return cmd
+    
+    elif tool == "mri2print":
+        # MRI to Print - convert FreeSurfer brain reconstructions to 3D-printable meshes
+        # Requires FreeSurfer derivatives as input
+        cmd = (
+            f"apptainer run "
+            f"-B {options['derivatives']}:/derivatives:ro "
+            f"-B {options['derivatives']}:/output "
+            f"{options['apptainer_img']}"
         )
         if tool_args:
             cmd += f" {tool_args}"

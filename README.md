@@ -10,6 +10,7 @@ ln2t_tools is a neuroimaging pipeline manager that supports multiple processing 
 - **QSIPrep**: Diffusion MRI preprocessing ([official docs](https://qsiprep.readthedocs.io/))
 - **QSIRecon**: Diffusion MRI reconstruction ([official docs](https://qsiprep.readthedocs.io/))
 - **MELD Graph**: Lesion detection ([official docs](https://meld-graph.readthedocs.io/))
+- **MRI2Print**: Convert FreeSurfer brain reconstructions to 3D-printable STL meshes ([official docs](https://github.com/arovai/mri2print))
 
 ## Table of Contents
 1. [Data Organization](#data-organization)
@@ -22,6 +23,7 @@ ln2t_tools is a neuroimaging pipeline manager that supports multiple processing 
    - [QSIPrep](#qsiprep)
    - [QSIRecon](#qsirecon)
    - [MELD Graph](#meld-graph)
+   - [MRI2Print](#mri2print)
 5. [Configuration-Based Processing](#configuration-based-processing)
 6. [Instance Management](#instance-management)
 7. [Command-line Completion](#command-line-completion)

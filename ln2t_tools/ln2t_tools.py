@@ -59,7 +59,8 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_MELDGRAPH_VERSION,
     DEFAULT_MELD_FS_VERSION,
     DEFAULT_CVRMAP_VERSION,
-    DEFAULT_BIDS_VALIDATOR_VERSION
+    DEFAULT_BIDS_VALIDATOR_VERSION,
+    DEFAULT_MRI2PRINT_VERSION
 )
 from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio, pre_import_physio
 from ln2t_tools.import_data.dicom import discover_participants_from_dicom_dir
@@ -1522,7 +1523,8 @@ def main(args=None) -> None:
                                     DEFAULT_QSIRECON_VERSION if args.tool == 'qsirecon' else \
                                     DEFAULT_MELDGRAPH_VERSION if args.tool == 'meld_graph' else \
                                     DEFAULT_CVRMAP_VERSION if args.tool == 'cvrmap' else \
-                                    DEFAULT_BIDS_VALIDATOR_VERSION if args.tool == 'bids_validator' else None
+                                    DEFAULT_BIDS_VALIDATOR_VERSION if args.tool == 'bids_validator' else \
+                                    DEFAULT_MRI2PRINT_VERSION if args.tool == 'mri2print' else None
                     tools_to_run = {args.tool: getattr(args, 'version', None) or default_version}
                 else:
                     logger.warning(f"No tools specified for dataset {dataset}, skipping")
@@ -1700,7 +1702,7 @@ def main(args=None) -> None:
 
                 # Process each tool for this dataset
                 for tool, version in tools_to_run.items():
-                    if tool not in ["freesurfer", "fastsurfer", "fmriprep", "qsiprep", "qsirecon", "meld_graph", "cvrmap", "bids_validator"]:
+                    if tool not in ["freesurfer", "fastsurfer", "fmriprep", "qsiprep", "qsirecon", "meld_graph", "cvrmap", "bids_validator", "mri2print"]:
                         logger.warning(f"Unsupported tool {tool} for dataset {dataset}, skipping")
                         continue
                     
