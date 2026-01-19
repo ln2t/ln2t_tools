@@ -32,64 +32,20 @@ class Mri2PrintTool(BaseTool):
     
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        """Add tool-specific CLI arguments."""
-        parser.add_argument(
-            "--fs-version",
-            default=None,
-            help="FreeSurfer version to use for input data (default: auto-detect latest)"
-        )
-        parser.add_argument(
-            "--decimation",
-            type=int,
-            default=10000000000,
-            help="Target face count for mesh decimation (default: 10000000000 - no decimation)"
-        )
-        parser.add_argument(
-            "--skip-cortex",
-            action="store_true",
-            help="Skip cortical surface processing"
-        )
-        parser.add_argument(
-            "--skip-subcortex",
-            action="store_true",
-            help="Skip subcortical structure processing"
-        )
-        parser.add_argument(
-            "--no-compress",
-            action="store_true",
-            help="Don't gzip the output STL files"
-        )
-        parser.add_argument(
-            "--cortex-iterations",
-            type=int,
-            default=70,
-            help="Cortex smoothing iterations (default: 70)"
-        )
-        parser.add_argument(
-            "--subcortex-iterations",
-            type=int,
-            default=10,
-            help="Subcortex smoothing iterations (default: 10)"
-        )
+        """Add tool-specific CLI arguments.
+        
+        Note: mri2print options should be passed via --tool-args.
+        The --fs-version argument is handled as a common argument.
+        """
+        pass
     
     @classmethod
     def validate_args(cls, args: argparse.Namespace) -> bool:
-        """Validate tool-specific arguments."""
-        if getattr(args, 'decimation', None) is not None:
-            if getattr(args, 'decimation', 0) < 0:
-                logger.error("--decimation must be a positive integer")
-                return False
+        """Validate tool-specific arguments.
         
-        cortex_iter = getattr(args, 'cortex_iterations', None)
-        if cortex_iter is not None and cortex_iter < 0:
-            logger.error("--cortex-iterations must be a positive integer")
-            return False
-        
-        subcortex_iter = getattr(args, 'subcortex_iterations', None)
-        if subcortex_iter is not None and subcortex_iter < 0:
-            logger.error("--subcortex-iterations must be a positive integer")
-            return False
-        
+        FreeSurfer version is optional and will be auto-detected if not provided.
+        """
+        # No validation needed - fs-version is optional
         return True
     
     @classmethod
@@ -166,19 +122,19 @@ class Mri2PrintTool(BaseTool):
             fs_dir_pattern = "freesurfer_*"
             logger.info(f"build_command: Auto-detecting FreeSurfer version")
         
-        fs_parent = dataset_derivatives.parent
-        fs_dirs = sorted(fs_parent.glob(fs_dir_pattern))
+        # Search within the dataset_derivatives directory for freesurfer_* subdirectories
+        fs_dirs = sorted(dataset_derivatives.glob(fs_dir_pattern))
         
         if not fs_dirs:
             logger.warning(
-                f"No FreeSurfer output found in {fs_parent} matching '{fs_dir_pattern}'. "
+                f"No FreeSurfer output found in {dataset_derivatives} matching '{fs_dir_pattern}'. "
                 f"Please run FreeSurfer first."
             )
             # Fallback to a reasonable default path
             if fs_version:
-                fs_input_dir = fs_parent / f"freesurfer_{fs_version}" / f"sub-{participant_label}"
+                fs_input_dir = dataset_derivatives / f"freesurfer_{fs_version}" / f"sub-{participant_label}"
             else:
-                fs_input_dir = dataset_derivatives / f"freesurfer/sub-{participant_label}"
+                fs_input_dir = dataset_derivatives / "freesurfer" / f"sub-{participant_label}"
         else:
             # Use the most recent/last matching directory
             fs_input_dir = fs_dirs[-1] / f"sub-{participant_label}"
@@ -197,27 +153,8 @@ class Mri2PrintTool(BaseTool):
             participant_label,
         ]
         
-        # Add tool-specific options
-        decimation = getattr(args, 'decimation', 10000000000)
-        if decimation != 10000000000:
-            cmd.extend(["--decimation", str(decimation)])
-        
-        if getattr(args, 'skip_cortex', False):
-            cmd.append("--skip-cortex")
-        
-        if getattr(args, 'skip_subcortex', False):
-            cmd.append("--skip-subcortex")
-        
-        if getattr(args, 'no_compress', False):
-            cmd.append("--no-compress")
-        
-        cortex_iter = getattr(args, 'cortex_iterations', 70)
-        if cortex_iter != 70:
-            cmd.extend(["--cortex-iterations", str(cortex_iter)])
-        
-        subcortex_iter = getattr(args, 'subcortex_iterations', 10)
-        if subcortex_iter != 10:
-            cmd.extend(["--subcortex-iterations", str(subcortex_iter)])
+        # Tool-specific options should be passed via --tool-args
+        # The mri2print container will handle them
         
         logger.info(f"build_command: Final command: {' '.join(cmd)}")
         return cmd

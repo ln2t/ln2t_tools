@@ -1156,14 +1156,31 @@ FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 mkdir -p "$OUTPUT_DIR"
 
+# Setup temp directory for FreeSurfer (required)
+export TMPDIR="${{LOCALSCRATCH:-/tmp}}/${{SLURM_JOB_ID:-$$}}"
+mkdir -p "$TMPDIR"
+
+# Find T1w image for this participant
+T1W_FILE=$(find "$HPC_RAWDATA/$DATASET-rawdata/$PARTICIPANT" -name "*_T1w.nii.gz" | head -1)
+if [ -z "$T1W_FILE" ]; then
+    echo "ERROR: No T1w file found for $PARTICIPANT"
+    exit 1
+fi
+echo "Using T1w file: $T1W_FILE"
+
 # Run FreeSurfer
 apptainer exec \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/output" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
+    -B "$TMPDIR:/tmp" \\
     --env SUBJECTS_DIR=/output \\
+    --env TMPDIR=/tmp \\
     {apptainer_img} \\
-    recon-all -s "$PARTICIPANT" -i "/data/$PARTICIPANT/anat/"*"_T1w.nii.gz" -all $TOOL_ARGS
+    recon-all -s "$PARTICIPANT" -i "$T1W_FILE" -all $TOOL_ARGS
+
+# Cleanup temp directory
+rm -rf "$TMPDIR"
 """
     
     elif tool == "fastsurfer":

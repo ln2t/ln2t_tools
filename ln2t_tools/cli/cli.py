@@ -134,6 +134,13 @@ def add_common_arguments(parser, exclude_participant_label=False):
     )
     
     parser.add_argument(
+        "--fs-version",
+        default=None,
+        help="FreeSurfer version to use for input data (when tool depends on FreeSurfer). "
+             "Default: auto-detect latest"
+    )
+    
+    parser.add_argument(
         "--max-instances",
         type=int,
         default=MAX_PARALLEL_INSTANCES,
