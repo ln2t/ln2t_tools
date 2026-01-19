@@ -1168,6 +1168,9 @@ if [ -z "$T1W_FILE" ]; then
 fi
 echo "Using T1w file: $T1W_FILE"
 
+# Convert host path to container path
+T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
+
 # Run FreeSurfer
 apptainer exec \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
@@ -1177,7 +1180,7 @@ apptainer exec \\
     --env SUBJECTS_DIR=/output \\
     --env TMPDIR=/tmp \\
     {apptainer_img} \\
-    recon-all -s "$PARTICIPANT" -i "$T1W_FILE" -all $TOOL_ARGS
+    recon-all -s "$PARTICIPANT" -i "$T1W_CONTAINER_PATH" -all $TOOL_ARGS
 
 # Cleanup temp directory
 rm -rf "$TMPDIR"
@@ -1208,6 +1211,9 @@ if [ -z "$T1W_FILE" ]; then
 fi
 echo "Using T1w file: $T1W_FILE"
 
+# Convert host path to container path
+T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
+
 # Run FastSurfer
 apptainer exec {gpu_flag} \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
@@ -1218,7 +1224,7 @@ apptainer exec {gpu_flag} \\
     /fastsurfer/run_fastsurfer.sh \\
     --sd /output \\
     --sid $PARTICIPANT \\
-    --t1 "$T1W_FILE" \\
+    --t1 "$T1W_CONTAINER_PATH" \\
     --fs_license /opt/freesurfer/license.txt \\
     $TOOL_ARGS
 """
