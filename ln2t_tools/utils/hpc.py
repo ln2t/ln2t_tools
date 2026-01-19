@@ -1175,10 +1175,11 @@ T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
 apptainer exec \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/output" \\
-    -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
+    -B "$FS_LICENSE:/usr/local/freesurfer/.license:ro" \\
     -B "$TMPDIR:/tmp" \\
     --env SUBJECTS_DIR=/output \\
     --env TMPDIR=/tmp \\
+    --env FS_LICENSE=/usr/local/freesurfer/.license \\
     {apptainer_img} \\
     recon-all -s "$PARTICIPANT" -i "$T1W_CONTAINER_PATH" -all $TOOL_ARGS
 
