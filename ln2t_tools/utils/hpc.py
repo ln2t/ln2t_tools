@@ -1231,17 +1231,33 @@ apptainer exec {gpu_flag} \\
 """
     
     elif tool == "fmriprep":
+        from ln2t_tools.utils.defaults import DEFAULT_FMRIPREP_FS_VERSION
+        
         version = getattr(args, 'version', '25.1.4')
         fs_license = getattr(args, 'hpc_fs_license', None) or '$HOME/licenses/license.txt'
+        fs_version = getattr(args, 'fs_version', DEFAULT_FMRIPREP_FS_VERSION)
         apptainer_img = f"{hpc_apptainer_dir}/nipreps.fmriprep.{version}.sif"
         output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/fmriprep_{version}"
+        fs_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/freesurfer_{fs_version}"
         
         script += f"""
 # fMRIPrep setup
 FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 WORK_DIR="$OUTPUT_DIR/work"
+FS_DIR="{fs_dir}"
 mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
+
+# Check for existing FreeSurfer outputs
+if [ -d "$FS_DIR/sub-$PARTICIPANT" ]; then
+    echo "Found existing FreeSurfer output for sub-$PARTICIPANT, will use --fs-no-reconall"
+    FS_BINDING="-B $FS_DIR:/fsdir:ro"
+    FS_FLAG="--fs-subjects-dir /fsdir --fs-no-reconall"
+else
+    echo "No FreeSurfer output found for sub-$PARTICIPANT, fMRIPrep will run recon-all"
+    FS_BINDING=""
+    FS_FLAG=""
+fi
 
 # Run fMRIPrep
 apptainer run \\
@@ -1249,6 +1265,7 @@ apptainer run \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
+    $FS_BINDING \\
     --env FS_LICENSE=/opt/freesurfer/license.txt \\
     --cleanenv \\
     {apptainer_img} \\
@@ -1256,6 +1273,8 @@ apptainer run \\
     --participant-label {participant_label} \\
     -w /work \\
     --skip-bids-validation \\
+    --fs-license-file /opt/freesurfer/license.txt \\
+    $FS_FLAG \\
     $TOOL_ARGS
 """
     
