@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import fnmatch
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
 from collections import defaultdict
@@ -811,7 +812,8 @@ def import_meg(
     calibration_auto_detect = config.get('calibration', {}).get('auto_detect', True)
     meg_maxfilter_root = config.get('calibration', {}).get('maxfilter_root')
     if meg_maxfilter_root:
-        meg_maxfilter_root = Path(meg_maxfilter_root)
+        # Expand env vars and user home (e.g., $HOME/MEG/maxfilter)
+        meg_maxfilter_root = Path(os.path.expandvars(os.path.expanduser(str(meg_maxfilter_root)))).resolve()
         if not meg_maxfilter_root.exists():
             logger.warning(f"MaxFilter root not found: {meg_maxfilter_root}")
             meg_maxfilter_root = None
