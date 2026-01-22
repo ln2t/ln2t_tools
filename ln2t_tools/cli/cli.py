@@ -327,7 +327,7 @@ by administrators in the rawdata directory.
     add_common_arguments(parser_import)
     parser_import.add_argument(
         "--datatype",
-        choices=["dicom", "physio", "mrs", "all"],
+        choices=["dicom", "physio", "mrs", "meg", "all"],
         default="all",
         help="Type of source data to import (default: all)"
     )

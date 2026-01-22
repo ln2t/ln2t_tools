@@ -4,10 +4,12 @@ This module handles importing various types of source data into BIDS format:
 - DICOM images (via dcm2bids)
 - MRS data (via spec2bids/spec2nii)
 - Physiological recordings (via phys2bids)
+- MEG data (via mne-bids)
 """
 
 from .dicom import import_dicom
 from .mrs import import_mrs, pre_import_mrs
 from .physio import import_physio, pre_import_physio
+from .meg import import_meg
 
-__all__ = ['import_dicom', 'import_mrs', 'pre_import_mrs', 'import_physio', 'pre_import_physio']
+__all__ = ['import_dicom', 'import_mrs', 'pre_import_mrs', 'import_physio', 'pre_import_physio', 'import_meg']

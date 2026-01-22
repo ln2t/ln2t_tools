@@ -1,0 +1,48 @@
+{
+  "dataset": {
+    "dataset_name": "MyMEGStudy",
+    "datatype": "meg"
+  },
+  "file_patterns": [
+    {
+      "pattern": "*rest*.fif",
+      "task": "rest",
+      "run_extraction": "last_digits",
+      "description": "Resting state recording"
+    },
+    {
+      "pattern": "*chessboard*.fif",
+      "task": "visual",
+      "run_extraction": "last_digits",
+      "description": "Visual checkerboard task"
+    },
+    {
+      "pattern": "*memory*.fif",
+      "task": "memory",
+      "run_extraction": "last_digits",
+      "description": "Memory task"
+    },
+    {
+      "pattern": "*task*.fif",
+      "task": "task",
+      "run_extraction": "last_digits",
+      "description": "Generic task pattern"
+    }
+  ],
+  "calibration": {
+    "system": "triux",
+    "auto_detect": true,
+    "maxfilter_root": "/path/to/MEG/maxfilter",
+    "description": "System can be 'triux' or 'vectorview'. Set maxfilter_root to the directory containing ctc/ and sss/ subdirectories with calibration files."
+  },
+  "derivatives": {
+    "pipeline_name": "maxfilter",
+    "maxfilter_version": "2.2.20",
+    "description": "Set pipeline_name to 'none' to skip derivative processing, or specify name like 'maxfilter'. Version will be appended to directory name."
+  },
+  "options": {
+    "allow_maxshield": true,
+    "overwrite": true,
+    "description": "allow_maxshield: Allow reading MaxShield data. overwrite: Overwrite existing BIDS files."
+  }
+}
