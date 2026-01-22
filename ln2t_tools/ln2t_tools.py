@@ -50,6 +50,7 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_RAWDATA,
     DEFAULT_DERIVATIVES,
     DEFAULT_CODE,
+    DEFAULT_SOURCEDATA,
     DEFAULT_FS_VERSION,
     DEFAULT_FASTSURFER_VERSION,
     DEFAULT_FMRIPREP_VERSION,
@@ -62,7 +63,7 @@ from ln2t_tools.utils.defaults import (
     DEFAULT_BIDS_VALIDATOR_VERSION,
     DEFAULT_MRI2PRINT_VERSION
 )
-from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio, pre_import_physio
+from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio, pre_import_physio, import_meg
 from ln2t_tools.import_data.dicom import discover_participants_from_dicom_dir
 
 # Setup initial logging (will be reconfigured based on --verbosity)
@@ -232,7 +233,7 @@ def handle_import(args):
     
     # Setup directories
     dataset = args.dataset
-    sourcedata_dir = Path.home() / "sourcedata" / f"{dataset}-sourcedata"
+    sourcedata_dir = Path(DEFAULT_SOURCEDATA) / f"{dataset}-sourcedata"
     rawdata_dir = Path(DEFAULT_RAWDATA) / f"{dataset}-rawdata"
     
     # Resolve symlinks
@@ -242,12 +243,15 @@ def handle_import(args):
     # Check sourcedata exists
     if not sourcedata_dir.exists():
         logger.error(f"Sourcedata directory not found: {sourcedata_dir}")
-        logger.info(f"Expected location: ~/sourcedata/{dataset}-sourcedata")
+        logger.info(f"Expected location: {DEFAULT_SOURCEDATA}/{dataset}-sourcedata")
         return
     
     logger.info(f"Importing data for dataset: {dataset}")
     logger.info(f"Source: {sourcedata_dir}")
     logger.info(f"Target: {rawdata_dir}")
+    logger.debug(f"PATHS CONFIG - DEFAULT_SOURCEDATA: {DEFAULT_SOURCEDATA}")
+    logger.debug(f"PATHS CONFIG - DEFAULT_RAWDATA: {DEFAULT_RAWDATA}")
+    logger.debug(f"PATHS CONFIG - DEFAULT_DERIVATIVES: {DEFAULT_DERIVATIVES}")
     if args.participant_label:
         logger.info(f"Participants: {', '.join(args.participant_label)}")
     else:
@@ -376,9 +380,9 @@ def handle_import(args):
     
     # Determine which datatypes to import
     datatype_arg = getattr(args, 'datatype', 'all')
-    datatypes = [datatype_arg] if datatype_arg != 'all' else ['dicom', 'mrs', 'physio']
+    datatypes = [datatype_arg] if datatype_arg != 'all' else ['dicom', 'mrs', 'physio', 'meg']
     
-    import_success = {'dicom': False, 'mrs': False, 'physio': False}
+    import_success = {'dicom': False, 'mrs': False, 'physio': False, 'meg': False}
     
     for datatype in datatypes:
         logger.info(f"\n{'='*60}")
@@ -448,6 +452,25 @@ def handle_import(args):
                 physio_config=getattr(args, 'physio_config', None),
                 apptainer_dir=apptainer_dir,
                 matching_tolerance_sec=getattr(args, 'matching_tolerance_sec', None)
+            )
+        
+        elif datatype == 'meg':
+            # Check if meg directory exists
+            if not (sourcedata_dir / "meg").exists():
+                logger.info(f"No meg directory found in {sourcedata_dir}, skipping")
+                continue
+            
+            # Get derivatives directory
+            derivatives_dir = DEFAULT_DERIVATIVES / f"{dataset}-derivatives"
+            
+            import_success['meg'] = import_meg(
+                dataset=dataset,
+                participant_labels=args.participant_label,
+                sourcedata_dir=sourcedata_dir,
+                rawdata_dir=rawdata_dir,
+                derivatives_dir=derivatives_dir,
+                ds_initials=get_dataset_initials(dataset),
+                session=getattr(args, 'session', None)
             )
     
     # Final summary

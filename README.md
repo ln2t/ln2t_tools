@@ -54,10 +54,16 @@ All datasets are organized under your home directory:
 │       ├── dicom/                          # DICOM files from scanner
 │       ├── physio/                         # Physiological recordings (GE scanner)
 │       ├── mrs/                            # Magnetic Resonance Spectroscopy data
+│       ├── meg/                            # MEG data from Neuromag/Elekta/MEGIN
+│       │   ├── meg_XXXX/                   # MEG subject folders (4-digit ID)
+│       │   │   └── YYMMDD/                 # Session date folders
+│       │   │       └── *.fif               # MEG FIF files
+│       │   └── ...
 │       └── configs/                        # Configuration files
 │           ├── dcm2bids.json              # DICOM to BIDS conversion config
 │           ├── spec2bids.json             # MRS to BIDS conversion config
-│           └── physio.json                # Physiological data processing config
+│           ├── physio.json                # Physiological data processing config
+│           └── meg2bids.json              # MEG to BIDS conversion config
 │
 ├── rawdata/
 │   └── {dataset}-rawdata/                  # BIDS-formatted data
@@ -78,6 +84,12 @@ All datasets are organized under your home directory:
 │       │   ├── mrs/
 │       │   │   ├── sub-{id}_svs.nii.gz
 │       │   │   └── sub-{id}_svs.json
+│       │   ├── meg/
+│       │   │   ├── sub-{id}_task-{name}_meg.fif
+│       │   │   ├── sub-{id}_task-{name}_meg.json
+│       │   │   ├── sub-{id}_task-{name}_channels.tsv
+│       │   │   ├── sub-{id}_acq-crosstalk_meg.fif
+│       │   │   └── sub-{id}_acq-calibration_meg.dat
 │       │   └── func/ (physiological recordings)
 │       │       ├── sub-{id}_task-{name}_recording-cardiac_physio.tsv.gz
 │       │       ├── sub-{id}_task-{name}_recording-cardiac_physio.json
@@ -91,6 +103,7 @@ All datasets are organized under your home directory:
 │       ├── fmriprep_{version}/            # fMRIPrep outputs
 │       ├── qsiprep_{version}/             # QSIPrep outputs
 │       ├── qsirecon_{version}/            # QSIRecon outputs
+│       ├── maxfilter_{version}/           # MaxFilter MEG derivatives
 │       └── meld_graph_{version}/          # MELD Graph outputs
 │
 └── code/
@@ -1182,6 +1195,182 @@ When using `--phys2bids`:
 
 **Output**:
 - Converted BIDS files: `~/rawdata/{dataset}-rawdata/sub-{ID}/func/`
+
+### Import MEG Data
+
+```bash
+# Import MEG data (config file will be auto-detected from sourcedata/configs/meg2bids.json)
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype meg
+
+# Or specify a custom config file location
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype meg \
+  --meg-config /path/to/custom_config.json
+
+# Import with session (if not auto-detected)
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype meg \
+  --session 01
+
+# Import multiple participants
+ln2t_tools import --dataset mydataset --participant-label 01 02 03 --datatype meg
+```
+
+#### MEG Source Data Structure
+
+MEG source data should be organized as:
+
+```
+~/sourcedata/{dataset}-sourcedata/
+├── meg/
+│   ├── meg_1001/              # MEG subject folder (4-digit ID)
+│   │   ├── 250115/            # Session date folder (YYMMDD format)
+│   │   │   ├── rest.fif       # Raw MEG FIF files
+│   │   │   ├── task1.fif
+│   │   │   └── task1_mc.fif   # MaxFilter derivative (auto-detected)
+│   │   └── 250122/            # Second session (if applicable)
+│   │       └── rest.fif
+│   ├── meg_1002/
+│   │   └── 250116/
+│   │       └── rest.fif
+│   └── ...
+├── configs/
+│   └── meg2bids.json          # MEG conversion config (required)
+└── participants_complete.tsv  # Subject mapping (required)
+```
+
+**Key Points**:
+- **meg_XXXX folders**: 4-digit MEG ID for each subject
+- **Date folders**: Session date in YYMMDD format (e.g., 250115 for Jan 15, 2025)
+- **FIF files**: Neuromag/Elekta/MEGIN MEG data files
+- **Split files**: Large files (>2GB) automatically split as `file.fif`, `file-1.fif`, `file-2.fif`
+- **Derivatives**: MaxFilter processed files with suffixes like `_mc`, `_tsss`, `_ave` are auto-detected
+
+#### MEG Configuration File
+
+Create `meg2bids.json` in your configs directory with pattern matching rules:
+
+```json
+{
+  "dataset": {
+    "dataset_name": "MyMEGStudy",
+    "datatype": "meg"
+  },
+  "file_patterns": [
+    {
+      "pattern": "*rest*.fif",
+      "task": "rest",
+      "run_extraction": "last_digits",
+      "description": "Resting state recording"
+    },
+    {
+      "pattern": "*visual*.fif",
+      "task": "visual",
+      "run_extraction": "last_digits",
+      "description": "Visual task"
+    }
+  ],
+  "calibration": {
+    "system": "triux",
+    "auto_detect": true,
+    "maxfilter_root": "/path/to/MEG/maxfilter"
+  },
+  "derivatives": {
+    "pipeline_name": "maxfilter",
+    "maxfilter_version": "v2.2.20"
+  },
+  "options": {
+    "allow_maxshield": true,
+    "overwrite": true
+  }
+}
+```
+
+**file_patterns**: List of rules to match FIF filenames to BIDS task names
+- `pattern`: Glob pattern (e.g., `*rest*.fif`)
+- `task`: BIDS task name
+- `run_extraction`: How to extract run numbers (`"last_digits"` or `"none"`)
+
+**calibration**: Calibration file settings
+- `system`: `"triux"` or `"vectorview"`
+- `auto_detect`: Enable automatic calibration file detection
+- `maxfilter_root`: Path to MEG/maxfilter directory containing `ctc/` and `sss/` subdirectories
+
+**derivatives**: MaxFilter derivative handling (optional)
+- `pipeline_name`: Name for derivatives folder (e.g., `"maxfilter"`) or `"none"` to skip
+- `maxfilter_version`: Version to append to folder name
+
+**options**:
+- `allow_maxshield`: Allow reading MaxShield data (default: true)
+- `overwrite`: Overwrite existing BIDS files (default: true)
+
+See `example_meg_config.json` for a complete template.
+
+#### Participants Mapping
+
+The `participants_complete.tsv` file must map MEG IDs to BIDS subject IDs:
+
+```tsv
+participant_id	meg_id
+sub-01	1001
+sub-02	1002
+sub-03	1003
+```
+
+**Format**:
+- `participant_id`: BIDS subject ID (with `sub-` prefix)
+- `meg_id`: 4-digit MEG ID (matches `meg_XXXX` folder name)
+
+#### Session Auto-Detection
+
+- **Single session**: If only one date folder exists, no session label is added
+- **Multiple sessions**: Automatically numbered as `ses-01`, `ses-02`, etc. based on date folder order
+- **Manual override**: Use `--session` flag to specify a particular session
+
+#### Calibration Files
+
+MEG systems require calibration files for accurate measurements:
+
+**Triux System**:
+- Crosstalk: `ct_sparse_triux2.fif`
+- Fine-calibration: `sss_cal_XXXX_YYMMDD.dat` (date-matched to session)
+
+**VectorView System**:
+- Crosstalk: `ct_sparse_vectorview.fif`
+- Fine-calibration: `sss_cal_vectorview.dat`
+
+Files are auto-detected from `maxfilter_root/ctc/` and `maxfilter_root/sss/` directories and copied to BIDS rawdata as:
+- `sub-{id}_acq-crosstalk_meg.fif`
+- `sub-{id}_acq-calibration_meg.dat`
+
+#### MaxFilter Derivatives
+
+Automatically detected suffixes:
+- `_sss`, `_tsss`: Signal Space Separation
+- `_mc`: Movement compensation
+- `_trans`, `_quat`: Head position transforms
+- `_av`, `_ave`: Averaged data
+
+Example: `rest_mc_ave.fif` → BIDS: `sub-01_task-rest_proc-mc-ave_meg.fif` in derivatives
+
+**Output Structure**:
+
+```
+~/rawdata/{dataset}-rawdata/
+└── sub-01/
+    └── [ses-01/]
+        └── meg/
+            ├── sub-01_task-rest_meg.fif
+            ├── sub-01_task-rest_meg.json
+            ├── sub-01_task-rest_channels.tsv
+            ├── sub-01_acq-crosstalk_meg.fif
+            └── sub-01_acq-calibration_meg.dat
+
+~/derivatives/{dataset}-derivatives/
+└── maxfilter_v2.2.20/
+    └── sub-01/
+        └── [ses-01/]
+            └── meg/
+                └── sub-01_task-rest_proc-mc-ave_meg.fif
+```
 
 ### Import All Datatypes
 
