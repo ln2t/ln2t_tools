@@ -336,6 +336,46 @@ def extract_run_from_filename(filename: str, extraction_method: str = "last_digi
     return int(matches[-1]) if matches else None
 
 
+def find_meg_folder(meg_source_dir: Path, meg_id: str) -> Optional[Path]:
+    """Find MEG folder for a subject, supporting multiple naming conventions.
+    
+    Supports both:
+    - meg_XXXX (e.g., meg_1001)
+    - XXXX_meg (e.g., 1001_meg)
+    
+    Parameters
+    ----------
+    meg_source_dir : Path
+        Path to parent directory containing meg folders
+    meg_id : str
+        MEG ID (4 digits, e.g., '1001')
+    
+    Returns
+    -------
+    Optional[Path]
+        Path to MEG folder if found, None otherwise
+    """
+    if not meg_source_dir.exists():
+        return None
+    
+    # Try exact pattern first: meg_XXXX
+    meg_folder = meg_source_dir / f"meg_{meg_id}"
+    if meg_folder.exists() and meg_folder.is_dir():
+        return meg_folder
+    
+    # Try reverse pattern: XXXX_meg
+    meg_folder = meg_source_dir / f"{meg_id}_meg"
+    if meg_folder.exists() and meg_folder.is_dir():
+        return meg_folder
+    
+    # Fallback: search for any folder containing the meg_id
+    for item in meg_source_dir.iterdir():
+        if item.is_dir() and meg_id in item.name:
+            return item
+    
+    return None
+
+
 def auto_detect_sessions(source_dir: Path) -> List[Tuple[str, Optional[str]]]:
     """Auto-detect sessions from date-named folders.
     
@@ -598,6 +638,136 @@ def normalize_raw_info(raw: 'mne.io.BaseRaw') -> None:
         si['birthday'] = None
 
 
+def extract_eeg_information(raw: 'mne.io.BaseRaw') -> Optional[Dict[str, List[Any]]]:
+    """Extract EEG channel information from FIF file for electrodes.tsv.
+    
+    Detects simultaneous EEG channels in MEG FIF files and extracts electrode
+    coordinates from the FIF channel metadata. Returns None if no EEG channels found.
+    
+    Parameters
+    ----------
+    raw : mne.io.BaseRaw
+        MNE raw object loaded from FIF file
+    
+    Returns
+    -------
+    Optional[Dict[str, List[Any]]]
+        Dictionary with lists of electrode information:
+        {
+            'name': [...],      # EEG channel names
+            'x': [...],         # X coordinates (in meters, MEG device frame)
+            'y': [...],         # Y coordinates
+            'z': [...],         # Z coordinates
+            'size': [...]       # Electrode size (in meters)
+        }
+        Returns None if no EEG channels found.
+    """
+    # Get EEG channel indices
+    eeg_indices = mne.pick_types(raw.info, eeg=True, exclude=[])
+    
+    if len(eeg_indices) == 0:
+        return None
+    
+    eeg_data = {
+        'name': [],
+        'x': [],
+        'y': [],
+        'z': [],
+        'size': []
+    }
+    
+    for idx in eeg_indices:
+        ch_info = raw.info['chs'][idx]
+        
+        # Channel name
+        eeg_data['name'].append(ch_info['ch_name'])
+        
+        # Channel location in device coordinates (in meters)
+        # loc[0:3] contains the electrode position
+        loc = ch_info['loc'][:3]
+        eeg_data['x'].append(loc[0])
+        eeg_data['y'].append(loc[1])
+        eeg_data['z'].append(loc[2])
+        
+        # Electrode size (optional, in meters)
+        # Default to a reasonable size if not specified
+        size = ch_info.get('size', 0.005)  # Default 5mm if not specified
+        eeg_data['size'].append(size)
+    
+    return eeg_data
+
+
+def write_electrodes_tsv(
+    eeg_data: Dict[str, List[Any]],
+    subject: str,
+    session: Optional[str],
+    bids_root: Path,
+    datatype: str = 'meg'
+) -> None:
+    """Write electrodes.tsv file for simultaneous MEG/EEG recording.
+    
+    Creates a BIDS-compliant electrodes.tsv file with EEG electrode coordinates.
+    The electrodes are stored in MEG device coordinates (device frame).
+    
+    BIDS naming: sub-<label>[_ses-<label>]_electrodes.tsv
+    Location: sub-<label>[_ses-<label>]/meg/
+    
+    Parameters
+    ----------
+    eeg_data : Dict[str, List[Any]]
+        Dictionary with 'name', 'x', 'y', 'z', 'size' lists
+    subject : str
+        Subject label (e.g., '01', 'HC01')
+    session : Optional[str]
+        Session label (e.g., '01') or None
+    bids_root : Path
+        Root BIDS directory
+    datatype : str
+        Data type directory (default 'meg')
+    """
+    import csv
+    
+    # Determine the MEG directory
+    if session:
+        meg_dir = bids_root / f"sub-{subject}" / f"ses-{session}" / datatype
+    else:
+        meg_dir = bids_root / f"sub-{subject}" / datatype
+    
+    meg_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Build filename: sub-<label>[_ses-<label>]_electrodes.tsv
+    fname_parts = [f"sub-{subject}"]
+    if session:
+        fname_parts.append(f"ses-{session}")
+    fname_parts.append("electrodes.tsv")
+    filename = "_".join(fname_parts)
+    
+    electrodes_file = meg_dir / filename
+    
+    # Write TSV file with proper formatting
+    # BIDS required columns: name, x, y, z
+    # Optional column: size
+    with open(electrodes_file, 'w', newline='') as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=['name', 'x', 'y', 'z', 'size'],
+            delimiter='\t',
+            lineterminator='\n'
+        )
+        writer.writeheader()
+        
+        for i in range(len(eeg_data['name'])):
+            writer.writerow({
+                'name': eeg_data['name'][i],
+                'x': f"{eeg_data['x'][i]:.6f}",
+                'y': f"{eeg_data['y'][i]:.6f}",
+                'z': f"{eeg_data['z'][i]:.6f}",
+                'size': f"{eeg_data['size'][i]:.6f}"
+            })
+    
+    logger.info(f"    → Created electrodes.tsv: {filename} ({len(eeg_data['name'])} EEG channels)")
+
+
 def convert_raw_file(
     fif_path: Path,
     subject: str,
@@ -658,6 +828,12 @@ def convert_raw_file(
         
         write_raw_bids(raw, bids_path, overwrite=overwrite, verbose=False)
         logger.debug(f"    -> Saved BIDS file: {bids_path.basename}")
+        
+        # Check for simultaneous EEG recording and generate electrodes.tsv if present
+        eeg_data = extract_eeg_information(raw)
+        if eeg_data is not None:
+            write_electrodes_tsv(eeg_data, subject, session, bids_root, datatype)
+        
         return True
         
     except Exception as err:
@@ -843,10 +1019,10 @@ def import_meg(
             failed_participants.append(participant_id)
             continue
         
-        # Find MEG folder
-        meg_folder = meg_source_dir / f"meg_{meg_id}"
-        if not meg_folder.exists():
-            logger.error(f"  ✗ MEG folder not found: {meg_folder}")
+        # Find MEG folder (supports meg_XXXX or XXXX_meg naming)
+        meg_folder = find_meg_folder(meg_source_dir, meg_id)
+        if not meg_folder:
+            logger.error(f"  ✗ MEG folder not found for meg_id {meg_id} (tried meg_{meg_id}, {meg_id}_meg, or folder containing {meg_id})")
             failed_participants.append(participant_id)
             continue
         
