@@ -928,6 +928,80 @@ def process_fmriprep_subject(
     )
     launch_and_check(apptainer_cmd, "fMRIPrep", participant_label)
 
+def process_mri2print_subject(
+    layout: BIDSLayout,
+    participant_label: str,
+    args,
+    dataset_rawdata: Path,
+    dataset_derivatives: Path,
+    apptainer_img: str
+) -> None:
+    """Process a single subject with mri2print.
+    
+    mri2print requires FreeSurfer outputs to already exist.
+    It will look for FreeSurfer output in the derivatives directory
+    and bind it into the container.
+    """
+    from ln2t_tools.utils.utils import build_apptainer_cmd
+    
+    # Check for existing FreeSurfer output (required for mri2print)
+    # Parse entities from anatomical files to get session/run info
+    anat_files = layout.get(
+        subject=participant_label,
+        scope="raw",
+        suffix="T1w",
+        extension=".nii.gz",
+        return_type="filename"
+    )
+    
+    if not anat_files:
+        logger.warning(f"No anatomical images found for participant {participant_label}")
+        return
+    
+    entities = layout.parse_file_entities(anat_files[0])
+    
+    # Get FreeSurfer output directory (mri2print just needs the outputs, no version specificity)
+    fs_output_dir = get_freesurfer_output(
+        derivatives_dir=dataset_derivatives,
+        participant_label=participant_label,
+        version=DEFAULT_FS_VERSION,
+        session=entities.get('session'),
+        run=entities.get('run')
+    )
+    
+    if not fs_output_dir:
+        logger.error(
+            f"FreeSurfer output not found for participant {participant_label}. "
+            f"Please run FreeSurfer first before using mri2print."
+        )
+        return
+    
+    # Build output directory path
+    version = args.version or DEFAULT_MRI2PRINT_VERSION
+    output_label = args.output_label or f"mri2print_{version}"
+    output_dir = dataset_derivatives / output_label
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    output_subdir = build_bids_subdir(participant_label)
+    output_participant_dir = output_dir / output_subdir
+    
+    if output_participant_dir.exists():
+        logger.info(f"Output exists, skipping: {output_participant_dir}")
+        return
+    
+    # Build and launch mri2print command with FreeSurfer binding
+    apptainer_cmd = build_apptainer_cmd(
+        tool="mri2print",
+        fs_license=args.fs_license,
+        rawdata=str(dataset_rawdata),
+        derivatives=str(output_dir),
+        participant_label=participant_label,
+        apptainer_img=apptainer_img,
+        fs_subjects_dir=str(fs_output_dir),
+        tool_args=getattr(args, 'tool_args', '')
+    )
+    launch_and_check(apptainer_cmd, "mri2print", participant_label)
+
 def process_qsiprep_subject(
     layout: BIDSLayout,
     participant_label: str,
@@ -1950,8 +2024,7 @@ def main(args=None) -> None:
                                         apptainer_img=apptainer_img
                                     )
                                 elif tool == "mri2print":
-                                    from ln2t_tools.tools.mri2print import TOOL_CLASS as Mri2PrintTool
-                                    Mri2PrintTool.process_subject(
+                                    process_mri2print_subject(
                                         layout=layout,
                                         participant_label=participant_label,
                                         args=args,

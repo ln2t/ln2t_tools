@@ -1156,35 +1156,14 @@ FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 mkdir -p "$OUTPUT_DIR"
 
-# Setup temp directory for FreeSurfer (required)
-export TMPDIR="${{LOCALSCRATCH:-/tmp}}/${{SLURM_JOB_ID:-$$}}"
-mkdir -p "$TMPDIR"
-
-# Find T1w image for this participant
-T1W_FILE=$(find "$HPC_RAWDATA/$DATASET-rawdata/$PARTICIPANT" -name "*_T1w.nii.gz" | head -1)
-if [ -z "$T1W_FILE" ]; then
-    echo "ERROR: No T1w file found for $PARTICIPANT"
-    exit 1
-fi
-echo "Using T1w file: $T1W_FILE"
-
-# Convert host path to container path
-T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
-
 # Run FreeSurfer
 apptainer exec \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/output" \\
-    -B "$FS_LICENSE:/usr/local/freesurfer/.license:ro" \\
-    -B "$TMPDIR:/tmp" \\
+    -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
     --env SUBJECTS_DIR=/output \\
-    --env TMPDIR=/tmp \\
-    --env FS_LICENSE=/usr/local/freesurfer/.license \\
     {apptainer_img} \\
-    recon-all -s "$PARTICIPANT" -i "$T1W_CONTAINER_PATH" -all $TOOL_ARGS
-
-# Cleanup temp directory
-rm -rf "$TMPDIR"
+    recon-all -s "$PARTICIPANT" -i "/data/$PARTICIPANT/anat/"*"_T1w.nii.gz" -all $TOOL_ARGS
 """
     
     elif tool == "fastsurfer":
@@ -1212,9 +1191,6 @@ if [ -z "$T1W_FILE" ]; then
 fi
 echo "Using T1w file: $T1W_FILE"
 
-# Convert host path to container path
-T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
-
 # Run FastSurfer
 apptainer exec {gpu_flag} \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
@@ -1225,48 +1201,23 @@ apptainer exec {gpu_flag} \\
     /fastsurfer/run_fastsurfer.sh \\
     --sd /output \\
     --sid $PARTICIPANT \\
-    --t1 "$T1W_CONTAINER_PATH" \\
+    --t1 "$T1W_FILE" \\
     --fs_license /opt/freesurfer/license.txt \\
     $TOOL_ARGS
 """
     
     elif tool == "fmriprep":
-        from ln2t_tools.utils.defaults import DEFAULT_FMRIPREP_FS_VERSION
-        
         version = getattr(args, 'version', '25.1.4')
         fs_license = getattr(args, 'hpc_fs_license', None) or '$HOME/licenses/license.txt'
-        fs_version = getattr(args, 'fs_version', None) or DEFAULT_FMRIPREP_FS_VERSION
         apptainer_img = f"{hpc_apptainer_dir}/nipreps.fmriprep.{version}.sif"
         output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/fmriprep_{version}"
-        fs_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/freesurfer_{fs_version}"
         
         script += f"""
 # fMRIPrep setup
 FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 WORK_DIR="$OUTPUT_DIR/work"
-FS_DIR="{fs_dir}"
 mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
-
-# Debug: Print paths being checked
-echo "DEBUG: Checking for FreeSurfer outputs..."
-echo "DEBUG: HPC_DERIVATIVES=$HPC_DERIVATIVES"
-echo "DEBUG: DATASET=$DATASET"
-echo "DEBUG: FS_DIR=$FS_DIR"
-echo "DEBUG: PARTICIPANT=$PARTICIPANT"
-echo "DEBUG: Looking for: $FS_DIR/$PARTICIPANT"
-ls -la "$FS_DIR/" 2>/dev/null || echo "DEBUG: FS_DIR does not exist or cannot be listed"
-
-# Check for existing FreeSurfer outputs
-if [ -d "$FS_DIR/$PARTICIPANT" ]; then
-    echo "Found existing FreeSurfer output for $PARTICIPANT, will use --fs-no-reconall"
-    FS_BINDING="-B $FS_DIR:/fsdir:ro"
-    FS_FLAG="--fs-subjects-dir /fsdir --fs-no-reconall"
-else
-    echo "No FreeSurfer output found for $PARTICIPANT, fMRIPrep will run recon-all"
-    FS_BINDING=""
-    FS_FLAG=""
-fi
 
 # Run fMRIPrep
 apptainer run \\
@@ -1274,7 +1225,6 @@ apptainer run \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
-    $FS_BINDING \\
     --env FS_LICENSE=/opt/freesurfer/license.txt \\
     --cleanenv \\
     {apptainer_img} \\
@@ -1282,8 +1232,6 @@ apptainer run \\
     --participant-label {participant_label} \\
     -w /work \\
     --skip-bids-validation \\
-    --fs-license-file /opt/freesurfer/license.txt \\
-    $FS_FLAG \\
     $TOOL_ARGS
 """
     

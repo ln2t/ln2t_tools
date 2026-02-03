@@ -5,7 +5,7 @@ _ln2t_tools_completion() {
     _init_completion || return
 
     # List of tools
-    local tools="freesurfer fastsurfer fmriprep qsiprep qsirecon meld_graph cvrmap bids_validator mri2print import"
+    local tools="freesurfer fastsurfer fmriprep qsiprep qsirecon meld_graph cvrmap import"
     
     # Function to get dataset name from command line
     _get_dataset_name() {
@@ -51,7 +51,7 @@ _ln2t_tools_completion() {
 
     # Handle options
     case $prev in
-        freesurfer|fastsurfer|fmriprep|qsiprep|qsirecon|meld_graph|cvrmap|bids_validator|mri2print|import)
+        freesurfer|fastsurfer|fmriprep|qsiprep|qsirecon|meld_graph|cvrmap|import)
             COMPREPLY=( $(compgen -W "--dataset" -- "$cur") )
             return 0
             ;;
@@ -127,11 +127,6 @@ _ln2t_tools_completion() {
             # Add CVRmap specific options
             if [[ ${words[1]} == "cvrmap" ]]; then
                 opts+=" --task --fmriprep-version --space --baseline-method --roi-probe --roi-coordinates --roi-radius --n-jobs --config"
-            fi
-            
-            # Add MRI2Print specific options
-            if [[ ${words[1]} == "mri2print" ]]; then
-                opts+=" --fs-version"
             fi
             
             # Add Import specific options
