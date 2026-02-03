@@ -624,21 +624,22 @@ def build_apptainer_cmd(tool: str, **options) -> str:
     
     elif tool == "mri2print":
         # MRI2Print for 3D printable models - requires FreeSurfer outputs
+        # mri2print uses non-BIDS-app syntax: mri2print -f /path/to/freesurfer -o /output subject_id
+        if not options.get('fs_subjects_dir'):
+            raise ValueError("FreeSurfer subjects directory is required for mri2print")
+        
         bindings = [
-            f"-B {options['rawdata']}:/data:ro",
+            f"-B {options['fs_subjects_dir']}:/fsdir:ro",
             f"-B {options['derivatives']}:/derivatives"
         ]
-        
-        # Add FreeSurfer subjects directory binding if available
-        if options.get('fs_subjects_dir'):
-            bindings.append(f"-B {options['fs_subjects_dir']}:/fsdir:ro")
         
         cmd = (
             f"apptainer run "
             f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
-            f"/data /derivatives/{options['output_label']} participant "
-            f"--participant-label {options['participant_label']}"
+            f"-f /fsdir "
+            f"-o /derivatives/{options['output_label']} "
+            f"{options['participant_label']}"
         )
         if tool_args:
             cmd += f" {tool_args}"

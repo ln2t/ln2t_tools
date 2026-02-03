@@ -996,6 +996,7 @@ def process_mri2print_subject(
         rawdata=str(dataset_rawdata),
         derivatives=str(output_dir),
         participant_label=participant_label,
+        output_label=output_label,
         apptainer_img=apptainer_img,
         fs_subjects_dir=str(fs_output_dir),
         tool_args=getattr(args, 'tool_args', '')
