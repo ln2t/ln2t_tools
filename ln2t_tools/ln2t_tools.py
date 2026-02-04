@@ -20,6 +20,7 @@ from ln2t_tools.utils.utils import (
     launch_apptainer,
     build_apptainer_cmd,
     get_freesurfer_output,
+    get_freesurfer_output_with_fallback,
     InstanceManager,
     setup_meld_data_structure,
     create_meld_config_json,
@@ -854,7 +855,13 @@ def process_fmriprep_subject(
     dataset_derivatives: Path,
     apptainer_img: str
 ) -> None:
-    """Process a single subject with fMRIPrep."""
+    """Process a single subject with fMRIPrep.
+    
+    Handles multi-session datasets intelligently:
+    - First tries to find FreeSurfer output matching the session of the anatomical data
+    - If not found, falls back to any available FreeSurfer output for the participant
+    - This allows processing sessions that only have functional data (no anatomical scan)
+    """
     # Check for required files
     t1w_files = layout.get(
         subject=participant_label,
@@ -881,15 +888,20 @@ def process_fmriprep_subject(
         logger.warning(f"No functional data found for participant {participant_label}")
         return
 
-    # Check for existing FreeSurfer output
+    # Check for existing FreeSurfer output with fallback for multi-session datasets
+    # This handles the case where session A has anat+func, session B has only func
     entities = layout.parse_file_entities(t1w_files[0])
-    fs_output_dir = get_freesurfer_output(
+    fs_output_dir, fallback_warning = get_freesurfer_output_with_fallback(
         derivatives_dir=dataset_derivatives,
         participant_label=participant_label,
         version=DEFAULT_FMRIPREP_FS_VERSION,
-        session=entities.get('session'),
+        requested_session=entities.get('session'),
         run=entities.get('run')
     )
+    
+    # Log fallback warning if we're using data from a different session
+    if fallback_warning:
+        logger.warning(fallback_warning)
 
     # Build output directory path
     output_subdir = build_bids_subdir(participant_label)

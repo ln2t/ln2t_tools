@@ -405,6 +405,84 @@ def get_freesurfer_output(
     fs_dir = derivatives_dir / f"freesurfer_{version}" / subject_id
     return fs_dir if fs_dir.exists() and (fs_dir / "surf/rh.white").exists() else None
 
+
+def get_freesurfer_output_with_fallback(
+    derivatives_dir: Path,
+    participant_label: str,
+    version: str,
+    requested_session: Optional[str] = None,
+    run: Optional[str] = None
+) -> tuple[Optional[Path], Optional[str]]:
+    """Check if FreeSurfer output exists for a subject, with session fallback.
+    
+    This function first tries to find FreeSurfer output for the exact session
+    requested. If not found, it searches for any available FreeSurfer output
+    for that participant (from a different session).
+    
+    This is useful for multi-session datasets where some sessions may only
+    have functional data without anatomical scans.
+    
+    Args:
+        derivatives_dir: Path to derivatives directory
+        participant_label: Subject ID
+        version: FreeSurfer version
+        requested_session: The session we're looking for (can be None)
+        run: Optional run number
+        
+    Returns:
+        Tuple of (path_to_freesurfer_output, warning_message)
+        - If exact match found: (path, None)
+        - If fallback used: (path, warning_message)
+        - If nothing found: (None, None)
+    """
+    # First, try exact match with requested session
+    exact_match = get_freesurfer_output(
+        derivatives_dir=derivatives_dir,
+        participant_label=participant_label,
+        version=version,
+        session=requested_session,
+        run=run
+    )
+    
+    if exact_match:
+        return exact_match, None
+    
+    # If no exact match and we have a specific session requested,
+    # search for any available FreeSurfer output for this participant
+    fs_base_dir = derivatives_dir / f"freesurfer_{version}"
+    if not fs_base_dir.exists():
+        return None, None
+    
+    # Look for any FreeSurfer output directories for this participant
+    participant_prefix = f"sub-{participant_label}"
+    fallback_dirs = []
+    
+    for item in fs_base_dir.iterdir():
+        if item.is_dir() and item.name.startswith(participant_prefix):
+            # Check if this is a valid FreeSurfer output
+            if (item / "surf/rh.white").exists():
+                fallback_dirs.append(item)
+    
+    if not fallback_dirs:
+        return None, None
+    
+    # Sort by name for reproducibility (prefer earlier sessions)
+    fallback_dirs.sort(key=lambda x: x.name)
+    fallback_dir = fallback_dirs[0]
+    
+    # Extract session info from fallback directory name for warning message
+    fallback_name = fallback_dir.name
+    requested_desc = f"ses-{requested_session}" if requested_session else "no session"
+    
+    warning_msg = (
+        f"FreeSurfer output not found for {participant_prefix} with {requested_desc}. "
+        f"Using anatomical data from '{fallback_name}' instead. "
+        f"This is common when a session only has functional data."
+    )
+    
+    return fallback_dir, warning_msg
+
+
 def build_apptainer_cmd(tool: str, **options) -> str:
     """Build Apptainer command for neuroimaging tools.
     
