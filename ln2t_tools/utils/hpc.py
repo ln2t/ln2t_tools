@@ -1156,53 +1156,35 @@ FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 mkdir -p "$OUTPUT_DIR"
 
-# Find T1w image for this participant (handles both session and non-session datasets)
-T1W_FILE=$(find "$HPC_RAWDATA/$DATASET-rawdata/$PARTICIPANT" -name "*_T1w.nii.gz" -type f 2>/dev/null | head -1)
+# Setup temp directory for FreeSurfer (required)
+export TMPDIR="${{LOCALSCRATCH:-/tmp}}/${{SLURM_JOB_ID:-$$}}"
+mkdir -p "$TMPDIR"
+
+# Find T1w image for this participant
+T1W_FILE=$(find "$HPC_RAWDATA/$DATASET-rawdata/$PARTICIPANT" -name "*_T1w.nii.gz" | head -1)
 if [ -z "$T1W_FILE" ]; then
-    echo "ERROR: No T1w file found for $PARTICIPANT in $HPC_RAWDATA/$DATASET-rawdata/$PARTICIPANT"
+    echo "ERROR: No T1w file found for $PARTICIPANT"
     exit 1
 fi
 echo "Using T1w file: $T1W_FILE"
 
-# Extract relative path for container (remove the rawdata prefix)
-T1W_RELATIVE="${{T1W_FILE#$HPC_RAWDATA/$DATASET-rawdata/}}"
-T1W_CONTAINER="/rawdata/$T1W_RELATIVE"
-echo "Container path: $T1W_CONTAINER"
+# Convert host path to container path
+T1W_CONTAINER_PATH="/data/$PARTICIPANT/anat/$(basename "$T1W_FILE")"
 
-# Determine subject ID for FreeSurfer output directory
-FILENAME=$(basename "$T1W_FILE")
-if [[ "$FILENAME" =~ ses-([^_]+) ]]; then
-    SESSION="${{BASH_REMATCH[1]}}"
-    FS_SUBJECT_ID="${{PARTICIPANT}}_ses-${{SESSION}}"
-    echo "Multi-session dataset detected, using subject ID: $FS_SUBJECT_ID"
-else
-    FS_SUBJECT_ID="$PARTICIPANT"
-    echo "Single-session dataset, using subject ID: $FS_SUBJECT_ID"
-fi
-
-# Check if output already exists
-if [ -d "$OUTPUT_DIR/$FS_SUBJECT_ID" ] && [ -f "$OUTPUT_DIR/$FS_SUBJECT_ID/surf/rh.white" ]; then
-    echo "FreeSurfer output already exists for $FS_SUBJECT_ID, skipping"
-    exit 0
-fi
-
-# Debug: Print command details before execution
-echo "=== FreeSurfer Debug Info ==="
-echo "OUTPUT_DIR: $OUTPUT_DIR"
-echo "FS_SUBJECT_ID: $FS_SUBJECT_ID"
-echo "T1W_CONTAINER: $T1W_CONTAINER"
-echo "FS_LICENSE: $FS_LICENSE"
-echo "Apptainer image: {apptainer_img}"
-echo "============================="
-
-# Run FreeSurfer using apptainer run with recon-all arguments after the image
-echo "Running: recon-all -all -subjid $FS_SUBJECT_ID -i $T1W_CONTAINER -sd /derivatives/freesurfer_7.3.2 $TOOL_ARGS"
-apptainer run \\
-    -B "$FS_LICENSE:/usr/local/freesurfer/.license" \\
-    -B "$HPC_RAWDATA/$DATASET-rawdata:/rawdata:ro" \\
-    -B "$OUTPUT_DIR:/derivatives" \\
+# Run FreeSurfer
+apptainer exec \\
+    -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
+    -B "$OUTPUT_DIR:/output" \\
+    -B "$FS_LICENSE:/usr/local/freesurfer/.license:ro" \\
+    -B "$TMPDIR:/tmp" \\
+    --env SUBJECTS_DIR=/output \\
+    --env TMPDIR=/tmp \\
+    --env FS_LICENSE=/usr/local/freesurfer/.license \\
     {apptainer_img} \\
-    recon-all -all -subjid "$FS_SUBJECT_ID" -i "$T1W_CONTAINER" -sd /derivatives/freesurfer_7.3.2 $TOOL_ARGS
+    recon-all -s "$PARTICIPANT" -i "$T1W_CONTAINER_PATH" -all $TOOL_ARGS
+
+# Cleanup temp directory
+rm -rf "$TMPDIR"
 """
     
     elif tool == "fastsurfer":
