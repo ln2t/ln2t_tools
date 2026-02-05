@@ -1195,15 +1195,16 @@ echo "FS_LICENSE: $FS_LICENSE"
 echo "Apptainer image: {apptainer_img}"
 echo "============================="
 
-# Run FreeSurfer - match the local processing command format exactly
-# Mount points: /rawdata (input), /derivatives (output), license at /usr/local/freesurfer/.license
+# Run FreeSurfer using apptainer exec with explicit bash command
+# Source FreeSurfer setup and run recon-all directly
 echo "Running: recon-all -all -subjid $FS_SUBJECT_ID -i $T1W_CONTAINER -sd /derivatives $TOOL_ARGS"
-apptainer run \\
+apptainer exec \\
     -B "$FS_LICENSE:/usr/local/freesurfer/.license:ro" \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/rawdata:ro" \\
     -B "$OUTPUT_DIR:/derivatives" \\
+    --env FS_LICENSE=/usr/local/freesurfer/.license \\
     {apptainer_img} \\
-    recon-all -all -subjid "$FS_SUBJECT_ID" -i "$T1W_CONTAINER" -sd /derivatives $TOOL_ARGS
+    /bin/bash -c "source /usr/local/freesurfer/SetUpFreeSurfer.sh && recon-all -all -subjid $FS_SUBJECT_ID -i $T1W_CONTAINER -sd /derivatives $TOOL_ARGS"
 """
     
     elif tool == "fastsurfer":
