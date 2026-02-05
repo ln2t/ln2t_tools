@@ -1203,8 +1203,11 @@ apptainer exec \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/rawdata:ro" \\
     -B "$OUTPUT_DIR:/derivatives" \\
     --env FS_LICENSE=/usr/local/freesurfer/.license \\
+    --env FS_SUBJECT_ID="$FS_SUBJECT_ID" \\
+    --env T1W_CONTAINER="$T1W_CONTAINER" \\
+    --env TOOL_ARGS="$TOOL_ARGS" \\
     {apptainer_img} \\
-    /bin/bash -c "source /usr/local/freesurfer/SetUpFreeSurfer.sh && recon-all -all -subjid $FS_SUBJECT_ID -i $T1W_CONTAINER -sd /derivatives $TOOL_ARGS"
+    /bin/bash -c 'source /usr/local/freesurfer/SetUpFreeSurfer.sh && recon-all -all -subjid "\$FS_SUBJECT_ID" -i "\$T1W_CONTAINER" -sd /derivatives \$TOOL_ARGS'
 """
     
     elif tool == "fastsurfer":
