@@ -283,6 +283,17 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--hpc-status",
+        nargs='?',
+        const='recent',
+        metavar='JOB_ID',
+        help="Check status of HPC jobs. Provide job ID(s) to check specific jobs, or leave empty for recent. "
+             "Combine with --dataset or --tool to filter by dataset/tool. "
+             "Usage: --hpc-status (recent), --hpc-status 12345 (specific), "
+             "--hpc-status --dataset D (all for dataset)"
+    )
+
+    parser.add_argument(
         "--verbosity",
         choices=["silent", "minimal", "verbose", "debug"],
         default="verbose",

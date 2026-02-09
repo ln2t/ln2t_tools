@@ -1515,10 +1515,28 @@ def submit_hpc_job(
         
         if job_id:
             logger.info(f"✓ Job submitted successfully! Job ID: {job_id}")
+            
+            # Save job information for status tracking
+            try:
+                from ln2t_tools.utils.hpc_status import JobInfo, save_job_info
+                from datetime import datetime
+                
+                job_info = JobInfo(
+                    job_id=job_id,
+                    tool=tool,
+                    dataset=dataset,
+                    participant=participant_label,
+                    submit_time=datetime.now().isoformat(),
+                    state="SUBMITTED"
+                )
+                save_job_info(job_info)
+                logger.debug(f"Saved job information for tracking")
+            except Exception as e:
+                logger.debug(f"Could not save job information: {e}")
+            
             return job_id
         else:
             logger.error(f"Could not parse job ID from sbatch output. stdout: {output!r}, stderr: {stderr!r}")
-            return None
             return None
             
     except subprocess.CalledProcessError as e:

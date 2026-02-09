@@ -201,6 +201,158 @@ def get_additional_contrasts(
     }
 
 
+def handle_hpc_status(args):
+    """Handle HPC job status queries.
+    
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command line arguments with hpc_status attribute
+    """
+    from ln2t_tools.utils.hpc_status import (
+        load_all_jobs, get_jobs_for_dataset, get_jobs_for_tool,
+        check_job_status, JobStatus
+    )
+    
+    hpc_status_arg = getattr(args, 'hpc_status', None)
+    
+    # Determine what jobs to display
+    jobs_to_check = []
+    
+    if hpc_status_arg is None or hpc_status_arg == 'recent':
+        # Show recent jobs (last 20)
+        all_jobs = load_all_jobs()
+        # Sort by submit time, newest first
+        sorted_jobs = sorted(
+            all_jobs.values(),
+            key=lambda j: j.submit_time,
+            reverse=True
+        )
+        jobs_to_check = sorted_jobs[:20]
+        
+        if not jobs_to_check:
+            logger.info("No HPC jobs found in history.")
+            return
+            
+    elif hasattr(args, 'dataset') and getattr(args, 'dataset', None):
+        # Filter by dataset
+        jobs_to_check = get_jobs_for_dataset(args.dataset)
+        if not jobs_to_check:
+            logger.info(f"No HPC jobs found for dataset: {args.dataset}")
+            return
+            
+    elif hasattr(args, 'tool') and getattr(args, 'tool', None) and args.tool != 'import':
+        # Filter by tool
+        jobs_to_check = get_jobs_for_tool(args.tool)
+        if not jobs_to_check:
+            logger.info(f"No HPC jobs found for tool: {args.tool}")
+            return
+            
+    else:
+        # Specific job ID provided
+        all_jobs = load_all_jobs()
+        if hpc_status_arg in all_jobs:
+            jobs_to_check = [all_jobs[hpc_status_arg]]
+        else:
+            logger.warning(f"Job {hpc_status_arg} not found in local history")
+            return
+    
+    if not jobs_to_check:
+        logger.info("No jobs to check.")
+        return
+    
+    # Display results
+    logger.info("\n" + "="*70)
+    logger.info("HPC Job Status Summary")
+    logger.info("="*70 + "\n")
+    
+    # Organize by status
+    pending_jobs = []
+    running_jobs = []
+    completed_jobs = []
+    failed_jobs = []
+    
+    # Try to connect to HPC if we have credentials to query live status
+    username = getattr(args, 'hpc_username', None)
+    hostname = getattr(args, 'hpc_hostname', None)
+    keyfile = getattr(args, 'hpc_keyfile', '~/.ssh/id_rsa')
+    gateway = getattr(args, 'hpc_gateway', None)
+    
+    can_query = username and hostname
+    
+    for job_info in jobs_to_check:
+        status = None
+        details = {'state': job_info.state}
+        
+        # Try to get live status if we have HPC credentials
+        if can_query:
+            try:
+                status, details = check_job_status(
+                    job_info.job_id,
+                    username,
+                    hostname,
+                    keyfile,
+                    gateway
+                )
+            except Exception as e:
+                logger.debug(f"Could not query live status for job {job_info.job_id}: {e}")
+                status = None
+        
+        # Use local status if live query failed
+        if status is None:
+            status = job_info.status_category
+        
+        if status == JobStatus.PENDING:
+            pending_jobs.append((job_info, status, details))
+        elif status == JobStatus.RUNNING:
+            running_jobs.append((job_info, status, details))
+        elif status == JobStatus.COMPLETED:
+            completed_jobs.append((job_info, status, details))
+        else:
+            failed_jobs.append((job_info, status, details))
+    
+    # Print by category
+    if pending_jobs:
+        logger.info("⏳ PENDING:")
+        for job_info, status, details in pending_jobs:
+            logger.info(f"  Job {job_info.job_id}: {job_info.tool} / {job_info.dataset} / sub-{job_info.participant}")
+        logger.info("")
+    
+    if running_jobs:
+        logger.info("▶️  RUNNING:")
+        for job_info, status, details in running_jobs:
+            logger.info(f"  Job {job_info.job_id}: {job_info.tool} / {job_info.dataset} / sub-{job_info.participant}")
+        logger.info("")
+    
+    if completed_jobs:
+        logger.info("✅ COMPLETED:")
+        for job_info, status, details in completed_jobs:
+            logger.info(f"  Job {job_info.job_id}: {job_info.tool} / {job_info.dataset} / sub-{job_info.participant}")
+        logger.info("")
+    
+    if failed_jobs:
+        logger.info("❌ FAILED/ERROR:")
+        for job_info, status, details in failed_jobs:
+            logger.info(f"  Job {job_info.job_id}: {status.value}")
+            logger.info(f"    Tool: {job_info.tool}, Dataset: {job_info.dataset}, Sub: sub-{job_info.participant}")
+            if details.get('reason'):
+                logger.info(f"    Reason: {details['reason']}")
+        logger.info("")
+    
+    # Summary
+    logger.info("="*70)
+    logger.info(f"Total: {len(jobs_to_check)} jobs")
+    logger.info(f"  Pending: {len(pending_jobs)}")
+    logger.info(f"  Running: {len(running_jobs)}")
+    logger.info(f"  Completed: {len(completed_jobs)}")
+    logger.info(f"  Failed: {len(failed_jobs)}")
+    logger.info("="*70)
+    
+    if not can_query and (pending_jobs or running_jobs):
+        logger.info("\nℹ️  Tip: For live status updates, provide HPC credentials:")
+        logger.info("   ln2t_tools --hpc-status --hpc-username YOUR_USER --hpc-hostname YOUR_HPC")
+
+
 def handle_import(args):
     """Handle import of source data to BIDS format.
     
@@ -1612,6 +1764,11 @@ def main(args=None) -> None:
                 tool=tool_name,
                 missing_participants=missing
             )
+            return
+
+        # Check for HPC status operation
+        if getattr(args, 'hpc_status', None) is not None:
+            handle_hpc_status(args)
             return
 
         # Handle import tool separately (doesn't follow the same pattern as processing tools)

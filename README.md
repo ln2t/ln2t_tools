@@ -1001,6 +1001,159 @@ Harmonization recommended with at least 20 subjects. You have 15 subjects.
 
 ---
 
+## Checking HPC Job Status
+
+After submitting jobs with `--hpc`, you can monitor their progress without needing to SSH into the cluster. ln2t_tools automatically tracks submitted jobs and provides an easy way to check their status.
+
+### Basic Status Checking
+
+```bash
+# Show status of recent jobs (last 20 submitted)
+ln2t_tools --hpc-status
+
+# Show status of a specific job ID
+ln2t_tools --hpc-status 12345678
+
+# Show status of multiple job IDs
+ln2t_tools --hpc-status 12345678 12345679 12345680
+
+# Show all jobs for a specific dataset
+ln2t_tools --hpc-status --dataset mydataset
+
+# Show all jobs for a specific tool
+ln2t_tools --hpc-status --tool freesurfer
+```
+
+### Job Status Categories
+
+The status output shows jobs organized by their current state:
+
+- **⏳ PENDING**: Job is waiting to start (in SLURM queue)
+- **▶️ RUNNING**: Job is currently executing
+- **✅ COMPLETED**: Job finished successfully
+- **❌ FAILED**: Job encountered an error
+- **⏱️ TIMEOUT**: Job exceeded time limit
+- **⛔ CANCELLED**: Job was cancelled by user or system
+
+### Example Output
+
+```bash
+$ ln2t_tools --hpc-status
+
+======================================================================
+HPC Job Status Summary
+======================================================================
+
+⏳ PENDING:
+  Job 12345678: freesurfer / mydataset / sub-01
+  Job 12345679: fmriprep / mydataset / sub-02
+
+▶️  RUNNING:
+  Job 12345680: qsiprep / mydataset / sub-03
+
+✅ COMPLETED:
+  Job 12345677: freesurfer / mydataset / sub-02
+
+❌ FAILED/ERROR:
+  Job 12345676: meld_graph (Timed out)
+    Tool: meld_graph, Dataset: mydataset, Sub: sub-01
+    Reason: TIME_LIMIT_EXCEEDED
+
+======================================================================
+Total: 6 jobs
+  Pending: 2
+  Running: 1
+  Completed: 1
+  Failed: 2
+======================================================================
+```
+
+### Detailed Job Information
+
+For more detailed information about a specific job, you can also manually query the HPC cluster if you have SSH access:
+
+```bash
+# Check a specific job on the cluster
+ssh your_username@lyra.ulb.be squeue -j 12345678
+
+# View job history and exit codes
+ssh your_username@lyra.ulb.be sacct -j 12345678 --format=JobID,State,ExitCode,Reason,Start,End,Elapsed
+
+# View job output/error logs on cluster
+ssh your_username@lyra.ulb.be cat ~/ln2t_hpc_jobs/{dataset}/{tool}_{participant}*_{job_id}.{out,err}
+```
+
+### Job History
+
+ln2t_tools keeps a local record of all submitted jobs in `~/.ln2t_tools/hpc_jobs.json`. This allows you to check job status even after logging out of your local machine or restarting.
+
+```bash
+# View the job history file (JSON format)
+cat ~/.ln2t_tools/hpc_jobs.json
+
+# Filter recent jobs with jq (if installed)
+jq '.[] | select(.submit_time > "2025-02-01") | {job_id, tool, dataset, state}' ~/.ln2t_tools/hpc_jobs.json
+```
+
+### Practical Workflow Example
+
+```bash
+# 1. Submit jobs to HPC cluster
+ln2t_tools freesurfer --dataset mydataset --participant-label 01 02 03 \
+  --hpc --hpc-user your_username --hpc-apptainer-dir /path/to/apptainer
+
+# Output shows: ✓ Job submitted successfully! Job IDs: 12345678, 12345679, 12345680
+
+# 2. Check status immediately
+ln2t_tools --hpc-status
+
+# Output: 3 pending jobs
+
+# 3. Check later (wait 30 minutes)
+ln2t_tools --hpc-status
+
+# Output: 1 running, 2 pending
+
+# 4. Check dataset-specific jobs
+ln2t_tools --hpc-status --dataset mydataset
+
+# 5. If issues detected, check detailed job logs
+ssh your_username@lyra.ulb.be sacct -j 12345678
+
+# 6. If job timed out, increase time limit and resubmit
+ln2t_tools freesurfer --dataset mydataset --participant-label 01 \
+  --hpc --hpc-time 48:00:00 --hpc-user your_username --hpc-apptainer-dir /path/to/apptainer
+```
+
+### Troubleshooting Job Status Queries
+
+**Jobs not showing in status**:
+- Jobs are stored locally in `~/.ln2t_tools/hpc_jobs.json`
+- Deleting this file will remove job history
+- Job status requires either the local job file or SSH access to the cluster
+
+**Want live status updates from cluster**:
+```bash
+# Provide HPC credentials for live query
+ln2t_tools --hpc-status 12345678 \
+  --hpc-user your_username \
+  --hpc-hostname lyra.ulb.be
+```
+
+**Job appears stuck**:
+```bash
+# Check more details on the cluster
+ssh your_username@lyra.ulb.be scontrol show job 12345678
+
+# Check cluster queue status
+ssh your_username@lyra.ulb.be squeue
+
+# Check system resources
+ssh your_username@lyra.ulb.be sinfo
+```
+
+---
+
 ## Configuration-Based Processing
 
 ln2t_tools supports configuration-based processing using a TSV file. Create a file named `processing_config.tsv` in your rawdata directory (`~/rawdata/processing_config.tsv`).
