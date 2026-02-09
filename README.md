@@ -20,10 +20,12 @@ ln2t_tools is a neuroimaging pipeline manager that supports multiple processing 
    - [QSIPrep](#qsiprep)
    - [QSIRecon](#qsirecon)
    - [MELD Graph](#meld-graph)
-5. [Configuration-Based Processing](#configuration-based-processing)
-6. [Instance Management](#instance-management)
-7. [Command-line Completion](#command-line-completion)
-8. [Adding a New Tool](#adding-a-new-tool)
+5. [Finding Available Options](#finding-available-options)
+6. [Configuration-Based Processing](#configuration-based-processing)
+7. [Instance Management](#instance-management)
+8. [HPC Job Submission](#hpc-job-submission)
+9. [Command-line Completion](#command-line-completion)
+10. [Adding a New Tool](#adding-a-new-tool)
 
 ---
 
@@ -276,6 +278,63 @@ Each tool has its own documentation for available options:
 - **QSIRecon**: [QSIRecon Documentation](https://qsiprep.readthedocs.io/)
 - **MELD Graph**: [MELD Graph Documentation](https://meld-graph.readthedocs.io/)
 - **CVRmap**: [CVRmap Documentation](https://github.com/arovai/cvrmap)
+
+### Finding Missing Participants
+
+The `--list-missing` flag helps identify which participants in your dataset still need processing for a specific tool. This is useful when:
+- Resuming incomplete pipelines after errors
+- Managing large cohorts with multiple tools
+- Generating copy-paste commands to process missing participants
+
+#### Basic Usage
+
+```bash
+# Show missing participants for a tool
+ln2t_tools <tool> --dataset mydataset --list-missing
+```
+
+#### Example Output
+
+```bash
+$ ln2t_tools freesurfer --dataset mydataset --list-missing
+
+FreeSurfer Processing Status for mydataset
+============================================
+Processed participants: 8
+Missing participants: 5
+
+Missing Participant IDs:
+  sub-05
+  sub-08
+  sub-12
+  sub-15
+  sub-19
+
+To process missing participants, run:
+  ln2t_tools freesurfer --dataset mydataset --participant-label 05 08 12 15 19
+```
+
+#### With Multiple Tools
+
+```bash
+# Check missing for fMRIPrep
+ln2t_tools fmriprep --dataset mydataset --list-missing
+
+# Check missing for QSIPrep
+ln2t_tools qsiprep --dataset mydataset --list-missing
+
+# Check missing for MELD Graph
+ln2t_tools meld_graph --dataset mydataset --list-missing
+```
+
+#### How It Works
+
+The `--list-missing` flag:
+1. Scans the rawdata directory for all participant IDs
+2. Checks the tool's derivatives directory for completed outputs
+3. Compares the two to identify missing participants
+4. Generates a ready-to-use command for processing missing subjects
+5. Automatically detects tool version from your setup
 
 ---
 
@@ -719,51 +778,163 @@ Results are saved in:
 
 ---
 
-#### Running on HPC Cluster with SLURM
+## HPC Job Submission
 
-MELD Graph can be submitted to a SLURM HPC cluster for processing:
+All neuroimaging tools in ln2t_tools can be submitted to HPC clusters using SLURM (Simple Linux Utility for Resource Management). This feature is not limited to MELD Graph—you can use `--slurm` with any tool: FreeSurfer, fMRIPrep, QSIPrep, QSIRecon, FastSurfer, CVRmap, etc.
+
+### Basic SLURM Submission
 
 ```bash
-# Basic SLURM submission
-ln2t_tools meld_graph --dataset mydataset \
+# FreeSurfer on HPC
+ln2t_tools freesurfer --dataset mydataset \
   --participant-label 01 \
   --slurm \
   --slurm-user your_username \
   --slurm-apptainer-dir /path/to/apptainer/images/on/cluster
 
-# SLURM with custom resources
-ln2t_tools meld_graph --dataset mydataset \
+# fMRIPrep on HPC
+ln2t_tools fmriprep --dataset mydataset \
+  --participant-label 01 \
+  --slurm \
+  --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer/images/on/cluster
+
+# QSIPrep on HPC
+ln2t_tools qsiprep --dataset mydataset \
+  --participant-label 01 \
+  --tool-args "--output-resolution 1.25" \
+  --slurm \
+  --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer/images/on/cluster
+```
+
+### Advanced Options with Custom Resources
+
+```bash
+# SLURM with GPU allocation
+ln2t_tools fastsurfer --dataset mydataset \
   --participant-label 01 02 03 \
   --slurm \
   --slurm-user your_username \
   --slurm-apptainer-dir /path/to/apptainer/images \
   --slurm-gpus 1 \
-  --slurm-mem 32G \
+  --slurm-mem 16G \
   --slurm-time 4:00:00 \
   --slurm-partition gpu
 
-# SLURM with harmonization
+# MELD Graph on HPC with harmonization
 ln2t_tools meld_graph --dataset mydataset \
   --participant-label 01 \
   --harmo-code H1 \
   --slurm \
   --slurm-user your_username \
-  --slurm-apptainer-dir /path/to/apptainer/images
+  --slurm-apptainer-dir /path/to/apptainer/images \
+  --slurm-gpus 1 \
+  --slurm-mem 32G
 ```
 
-**SLURM Options**:
-- `--slurm`: Enable SLURM submission
-- `--slurm-user`: Your username on the HPC cluster (required)
-- `--slurm-host`: HPC hostname (default: lyra.ulb.be)
-- `--slurm-apptainer-dir`: Path to apptainer images on the cluster (required)
-- `--slurm-rawdata`: Path to rawdata on cluster (default: `$GLOBALSCRATCH/rawdata`)
-- `--slurm-derivatives`: Path to derivatives on cluster (default: `$GLOBALSCRATCH/derivatives`)
-- `--slurm-fs-license`: Path to FreeSurfer license on cluster (default: `$HOME/licenses/license.txt`)
-- `--slurm-fs-version`: FreeSurfer version on cluster (default: 7.2.0)
-- `--slurm-partition`: SLURM partition (default: None - cluster decides)
-- `--slurm-time`: Job time limit (default: 1:00:00)
-- `--slurm-mem`: Memory allocation (default: 32G)
-- `--slurm-gpus`: Number of GPUs (default: 1)
+### SLURM Options
+
+All tools support the following SLURM options:
+
+| Option | Description | Required | Default |
+|--------|-------------|----------|---------|
+| `--slurm` | Enable SLURM job submission | No | Disabled |
+| `--slurm-user` | Your username on the HPC cluster | **Yes** (with `--slurm`) | - |
+| `--slurm-host` | HPC hostname to SSH into | No | `lyra.ulb.be` |
+| `--slurm-apptainer-dir` | Path to apptainer images on cluster | **Yes** (with `--slurm`) | - |
+| `--slurm-rawdata` | Path to rawdata directory on cluster | No | `$GLOBALSCRATCH/rawdata` |
+| `--slurm-derivatives` | Path to derivatives on cluster | No | `$GLOBALSCRATCH/derivatives` |
+| `--slurm-fs-license` | Path to FreeSurfer license on cluster | No | `$HOME/licenses/license.txt` |
+| `--slurm-fs-version` | FreeSurfer version on cluster (for tools requiring it) | No | `7.2.0` |
+| `--slurm-partition` | SLURM partition to submit to | No | None (cluster default) |
+| `--slurm-time` | Job time limit (format: HH:MM:SS) | No | `1:00:00` |
+| `--slurm-mem` | Memory allocation (format: Num[G,M]) | No | `32G` |
+| `--slurm-gpus` | Number of GPUs to allocate | No | `1` |
+
+### Examples by Tool
+
+#### FreeSurfer on HPC
+```bash
+ln2t_tools freesurfer --dataset mydataset --participant-label 01 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer
+```
+
+#### fMRIPrep on HPC with Custom Resources
+```bash
+ln2t_tools fmriprep --dataset mydataset --participant-label 01 02 03 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer \
+  --slurm-mem 48G --slurm-time 6:00:00
+```
+
+#### QSIPrep + QSIRecon Pipeline on HPC
+```bash
+# First run QSIPrep
+ln2t_tools qsiprep --dataset mydataset --participant-label 01 \
+  --tool-args "--output-resolution 1.25" \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer \
+  --slurm-gpus 1 --slurm-mem 32G
+
+# Then run QSIRecon (uses QSIPrep output)
+ln2t_tools qsirecon --dataset mydataset --participant-label 01 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer
+```
+
+#### FastSurfer with GPU on HPC
+```bash
+ln2t_tools fastsurfer --dataset mydataset --participant-label 01 02 03 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer \
+  --slurm-gpus 1 --slurm-partition gpu --slurm-time 4:00:00
+```
+
+#### MELD Graph on HPC
+```bash
+ln2t_tools meld_graph --dataset mydataset --participant-label 01 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer \
+  --slurm-gpus 1 --slurm-mem 32G
+```
+
+### How HPC Submission Works
+
+When you use the `--slurm` flag:
+
+1. **Script Generation**: ln2t_tools generates a SLURM batch script with your job parameters
+2. **Remote Submission**: The script is transferred to your HPC cluster and submitted via SSH
+3. **Job Monitoring**: Job ID is printed so you can monitor progress with `squeue`
+4. **Automatic Cleanup**: Job scripts are cleaned up after completion
+
+### Troubleshooting HPC Submission
+
+**SSH Connection Issues**:
+```bash
+# Verify SSH access to your cluster
+ssh your_username@lyra.ulb.be
+# or with custom host
+ln2t_tools freesurfer --dataset mydataset --slurm-host custom.hpc.org ...
+```
+
+**Missing Apptainer Directory**:
+```bash
+# Ensure directory exists on cluster and contains images
+ssh your_username@lyra.ulb.be ls /path/to/apptainer/
+
+# Copy images if needed
+scp freesurfer_7.3.2.sif your_username@lyra.ulb.be:/path/to/apptainer/
+```
+
+**Job Not Starting**:
+```bash
+# Check SLURM queue status on cluster
+ssh your_username@lyra.ulb.be squeue -u your_username
+# or check job details
+ssh your_username@lyra.ulb.be sinfo
+```
 
 ---
 
@@ -1454,20 +1625,58 @@ ln2t_tools --dataset mydataset
 ln2t_tools --dataset mydataset --participant-label 01 02 03
 ```
 
+### Resume Processing with Missing Participants
+
+If processing was interrupted or failed for some participants, you can easily identify and reprocess them:
+
+```bash
+# List missing participants for FreeSurfer
+ln2t_tools freesurfer --dataset mydataset --list-missing
+
+# Output shows command to run missing participants
+# To run, simply copy-paste the suggested command from output
+
+# Or manually specify missing participants
+ln2t_tools freesurfer --dataset mydataset --participant-label 05 08 12 15 19
+```
+
 ### Monitoring and Utilities
 
 ```bash
 # List available datasets
 ln2t_tools --list-datasets
 
-# List missing subjects for a tool
+# List missing subjects for any tool
 ln2t_tools freesurfer --dataset mydataset --list-missing
+ln2t_tools fmriprep --dataset mydataset --list-missing
+ln2t_tools qsiprep --dataset mydataset --list-missing
+ln2t_tools meld_graph --dataset mydataset --list-missing
 
 # Check running instances
 ln2t_tools --list-instances
 
 # Limit parallel executions
 ln2t_tools --max-instances 3 --dataset mydataset
+```
+
+### Processing on HPC Cluster
+
+```bash
+# Submit FreeSurfer to SLURM cluster
+ln2t_tools freesurfer --dataset mydataset \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer
+
+# Submit multiple participants to HPC
+ln2t_tools fmriprep --dataset mydataset --participant-label 01 02 03 \
+  --slurm --slurm-user your_username \
+  --slurm-apptainer-dir /path/to/apptainer \
+  --slurm-gpus 1 --slurm-mem 32G
+
+# List missing and submit to HPC (using output from --list-missing)
+ln2t_tools qsiprep --dataset mydataset --participant-label 05 08 12 \
+  --tool-args "--output-resolution 1.25" \
+  --slurm --slurm-user your_username --slurm-apptainer-dir /path/to/apptainer
 ```
 
 ---
