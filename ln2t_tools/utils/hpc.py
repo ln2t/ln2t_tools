@@ -1247,7 +1247,7 @@ apptainer run \\
     -B "$WORK_DIR:/work" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
     --env FS_LICENSE=/opt/freesurfer/license.txt \\
-    --cleanenv \\
+    --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1272,7 +1272,7 @@ apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
-    --cleanenv \\
+    --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1302,7 +1302,7 @@ apptainer run \\
     -B "$QSIPREP_DIR:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
-    --cleanenv \\
+    --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1385,7 +1385,7 @@ apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$DERIVATIVES_DIR:/derivatives" \\
     -B "$FMRIPREP_DIR:/fmriprep:ro" \\
-    --cleanenv \\
+    --cleanenv --containall \\
     {apptainer_img} \\
     /data /derivatives/$OUTPUT_LABEL participant \\
     --participant-label {participant_label} \\

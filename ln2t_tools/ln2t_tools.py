@@ -1105,14 +1105,24 @@ def process_fmriprep_subject(
         logger.info(f"Output exists, skipping: {output_participant_dir}")
         return
 
-    # If FreeSurfer output exists, use it
-    # Note: fs_no_reconall can be passed via --tool-args if needed
-    if fs_output_dir and not getattr(args, 'fs_no_reconall', False):
+    # fMRIPrep now requires pre-computed FreeSurfer outputs by default
+    # Users can override with --fmriprep-reconall to allow fMRIPrep to run FreeSurfer
+    allow_fs_reconall = getattr(args, 'fmriprep_reconall', False)
+    
+    if fs_output_dir:
         logger.info(f"Using existing FreeSurfer output: {fs_output_dir}")
         fs_subjects_dir = fs_output_dir
-    else:
-        logger.info("No existing FreeSurfer output found, will run reconstruction")
+    elif allow_fs_reconall:
+        logger.info("No existing FreeSurfer output found, but --fmriprep-reconall enabled, will allow fMRIPrep to run reconstruction")
         fs_subjects_dir = None
+    else:
+        logger.error(
+            f"No FreeSurfer output found for participant {participant_label}. "
+            f"fMRIPrep now requires pre-computed FreeSurfer outputs by default. "
+            f"Either run FreeSurfer first with 'ln2t_tools freesurfer' or use "
+            f"'--fmriprep-reconall' to allow fMRIPrep to run FreeSurfer reconstruction."
+        )
+        return
 
     # Build and launch fMRIPrep command
     # Tool-specific options (--output-spaces, --nprocs, etc.) are passed via --tool-args
@@ -1127,6 +1137,7 @@ def process_fmriprep_subject(
         participant_label=participant_label,
         apptainer_img=apptainer_img,
         fs_subjects_dir=fs_subjects_dir,
+        allow_fs_reconall=allow_fs_reconall,
         tool_args=getattr(args, 'tool_args', '')
     )
     launch_and_check(apptainer_cmd, "fMRIPrep", participant_label)

@@ -320,10 +320,9 @@ def parse_args() -> argparse.Namespace:
         # Add HPC arguments for cluster submission (not for dataset-wide tools)
         if tool_name not in dataset_wide_tools:
             add_hpc_arguments(tool_parser)
-        # NOTE: Tool-specific arguments are NO LONGER added here.
-        # Instead, users should use --tool-args to pass any tool-specific
-        # options directly to the container. This decouples ln2t_tools
-        # from tool-specific CLI changes.
+        # Add tool-specific arguments if the tool class provides them
+        if hasattr(tool_class, 'add_arguments'):
+            tool_class.add_arguments(tool_parser)
 
     # Import subcommand (special case - not a standard tool)
     parser_import = subparsers.add_parser(

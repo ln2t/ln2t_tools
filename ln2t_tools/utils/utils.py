@@ -529,7 +529,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             t1w_container = str(t1w_host)
         
         cmd = (
-            f"apptainer run -B {options['fs_license']}:/usr/local/freesurfer/.license "
+            f"apptainer run --cleanenv --containall -B {options['fs_license']}:/usr/local/freesurfer/.license "
             f"-B {options['rawdata']}:/rawdata:ro -B {options['derivatives']}:/derivatives "
             f"{options['apptainer_img']} recon-all -all -subjid {subject_id} "
             f"-i {t1w_container} "
@@ -551,14 +551,22 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         ]
         
         # Add FreeSurfer subjects directory binding if available
+        # By default, require pre-computed FreeSurfer outputs (--fs-no-reconall)
+        # Users can override this with --fmriprep-reconall flag
+        allow_reconall = options.get('allow_fs_reconall', False)
+        
         if options.get('fs_subjects_dir'):
             bindings.append(f"-B {options['fs_subjects_dir']}:/fsdir:ro")
+            fs_flag = " --fs-subjects-dir /fsdir"
+        elif not allow_reconall:
+            # Default behavior: require pre-computed FreeSurfer outputs
             fs_flag = " --fs-no-reconall"
         else:
+            # User explicitly allowed reconstruction
             fs_flag = ""
         
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
             f"/data /derivatives participant "
@@ -574,7 +582,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             raise ValueError("FreeSurfer license file path is required")
         
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/out "
@@ -597,7 +605,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             raise ValueError("qsiprep_dir is required for QSIRecon")
         
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
             f"-B {qsiprep_dir}:/data:ro "
             f"-B {options['derivatives']}:/out "
@@ -687,7 +695,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             raise ValueError("fmriprep_dir is required for CVRmap")
         
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/derivatives "
             f"-B {fmriprep_dir}:/fmriprep:ro "
@@ -712,7 +720,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         ]
         
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
             f"-f /fsdir "
@@ -726,7 +734,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
     elif tool == "bids_validator":
         # BIDS Validator for dataset validation
         cmd = (
-            f"apptainer run "
+            f"apptainer run --cleanenv --containall "
             f"-B {options['rawdata']}:/data:ro "
             f"{options['apptainer_img']} "
             f"/data"

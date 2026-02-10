@@ -410,22 +410,25 @@ ln2t_tools fmriprep --dataset mydataset --participant-label 01 02 03
 # Use specific version
 ln2t_tools fmriprep --dataset mydataset --participant-label 01 --version 24.0.1
 
-# Skip FreeSurfer reconstruction (uses existing FreeSurfer data if available)
-ln2t_tools fmriprep --dataset mydataset --participant-label 01 --fs-no-reconall
+# Allow FreeSurfer reconstruction if pre-computed outputs don't exist
+ln2t_tools fmriprep --dataset mydataset --participant-label 01 --fmriprep-reconall
 
 # Custom output spaces
 ln2t_tools fmriprep --dataset mydataset --participant-label 01 \
-  --output-spaces MNI152NLin2009cAsym:res-1 fsaverage:den-10k
+  --tool-args "--output-spaces MNI152NLin2009cAsym:res-1 fsaverage:den-10k"
 
 # Combine multiple options
 ln2t_tools fmriprep --dataset mydataset --participant-label 01 \
-  --fs-no-reconall \
-  --output-spaces MNI152NLin2009cAsym:res-2 MNI152NLin6Asym:res-2
+  --fmriprep-reconall \
+  --tool-args "--output-spaces MNI152NLin2009cAsym:res-2 MNI152NLin6Asym:res-2"
 ```
 
-**Notes**:
+**Important Notes**:
+- **fMRIPrep now requires pre-computed FreeSurfer outputs by default**
+  - If FreeSurfer outputs are not found, processing will be skipped
+  - Run FreeSurfer first: `ln2t_tools freesurfer --dataset mydataset --participant-label 01`
+  - Or use `--fmriprep-reconall` flag to allow fMRIPrep to run FreeSurfer reconstruction
 - Automatically uses existing FreeSurfer outputs if found (from `freesurfer_{version}` directory)
-- Set `--fs-no-reconall` to skip FreeSurfer even if outputs don't exist
 
 ---
 

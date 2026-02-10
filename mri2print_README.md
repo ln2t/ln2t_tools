@@ -67,7 +67,7 @@ apptainer build mri2print.sif mri2print.def
 ### Running with Apptainer
 
 ```bash
-apptainer run \
+apptainer run --cleanenv --containall \
     -B /path/to/freesurfer_license.txt:/opt/freesurfer/license.txt \
     -B /path/to/data:/data \
     mri2print.sif \
@@ -84,13 +84,13 @@ apptainer run \
 
 ```bash
 # Show help
-apptainer run mri2print.sif --help
+apptainer run --cleanenv --containall mri2print.sif --help
 
 # Show version
-apptainer run mri2print.sif --version
+apptainer run --cleanenv --containall mri2print.sif --version
 
 # Process with verbose output
-apptainer run \
+apptainer run --cleanenv --containall \
     -B ~/freesurfer_license.txt:/opt/freesurfer/license.txt \
     -B $(pwd):/data \
     mri2print.sif \
@@ -383,7 +383,7 @@ mri2print --meshgeometry /path/to/meshgeometry_linux xavier
 **Container: FreeSurfer license error**
 ```bash
 # Ensure your license file is bind-mounted correctly
-apptainer run \
+apptainer run --cleanenv --containall \
     -B /path/to/your/license.txt:/opt/freesurfer/license.txt \
     mri2print.sif ...
 ```

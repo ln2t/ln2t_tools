@@ -76,9 +76,14 @@ ln2t_tools/
 # Run FreeSurfer on single participant
 ln2t_tools freesurfer --dataset <dataset> --participant-label <subject>
 
-# Run fMRIPrep with tool-specific args
+# Run fMRIPrep with tool-specific args (now requires pre-computed FreeSurfer)
+# Note: fMRIPrep will fail if FreeSurfer outputs are not available
 ln2t_tools fmriprep --dataset <dataset> --participant-label <subject> \
-    --tool-args "--fs-no-reconall --output-spaces MNI152NLin2009cAsym:res-2"
+    --tool-args "--output-spaces MNI152NLin2009cAsym:res-2"
+
+# Allow fMRIPrep to run FreeSurfer if pre-computed outputs don't exist
+ln2t_tools fmriprep --dataset <dataset> --participant-label <subject> \
+    --fmriprep-reconall --tool-args "--output-spaces MNI152NLin2009cAsym:res-2"
 
 # Run QSIPrep with output resolution
 ln2t_tools qsiprep --dataset <dataset> --participant-label <subject> \
@@ -86,7 +91,7 @@ ln2t_tools qsiprep --dataset <dataset> --participant-label <subject> \
 
 # Run on HPC cluster
 ln2t_tools fmriprep --dataset <dataset> --participant-label <subject> --hpc \
-    --tool-args "--nprocs 8 --omp-nthreads 4"
+    --fmriprep-reconall --tool-args "--nprocs 8 --omp-nthreads 4"
 ```
 
 ## Key Functions

@@ -55,6 +55,10 @@ The pipeline automatically:
   - Uses existing FreeSurfer output if available
   - Adapts processing based on input data characteristics
 
+NOTE: fMRIPrep now requires pre-computed FreeSurfer outputs by default.
+If FreeSurfer outputs are not found, processing will be skipped unless you 
+explicitly provide the --fmriprep-reconall flag.
+
 Typical runtime: 2-6 hours per subject (depending on data)
 """
     default_version = DEFAULT_FMRIPREP_VERSION
@@ -64,8 +68,13 @@ Typical runtime: 2-6 hours per subject (depending on data)
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
         """Add fMRIPrep-specific CLI arguments.
         
-        Tool-specific options should be passed via --tool-args.
-        This method is kept for backward compatibility but adds no arguments.
+        Most tool-specific options should be passed via --tool-args.
+        
+        IMPORTANT: fMRIPrep now requires pre-computed FreeSurfer outputs by default.
+        If FreeSurfer outputs are not found:
+          1. Processing will be skipped with an informative error message
+          2. You can run FreeSurfer first: ln2t_tools freesurfer --dataset MYDATA
+          3. Or use --fmriprep-reconall to allow fMRIPrep to run reconstruction
         
         Example usage with --tool-args:
             ln2t_tools fmriprep --dataset MYDATA --participant-label 001 \\
@@ -73,13 +82,18 @@ Typical runtime: 2-6 hours per subject (depending on data)
                 
         Common fMRIPrep options (pass via --tool-args):
             --output-spaces <spaces>  : Output template spaces
-            --fs-no-reconall          : Skip FreeSurfer surface reconstruction
             --use-aroma               : Enable ICA-AROMA denoising
             --nprocs <n>              : Number of processes
             --omp-nthreads <n>        : Number of OpenMP threads
             --ignore fieldmaps        : Ignore fieldmap correction
         """
-        pass  # Tool-specific args now passed via --tool-args
+        parser.add_argument(
+            "--fmriprep-reconall",
+            dest="fmriprep_reconall",
+            action="store_true",
+            help="Allow fMRIPrep to run FreeSurfer reconstruction if pre-computed outputs are not found. "
+                 "By default, fMRIPrep requires existing FreeSurfer outputs and will skip processing if not found."
+        )
     
     @classmethod
     def validate_args(cls, args: argparse.Namespace) -> bool:
