@@ -982,7 +982,38 @@ def check_required_data(tool: str, dataset: str, participant_label: str, args: A
         logger.info(f"  [sub-{participant_label}] ✓ Rawdata found on HPC")
     
     # Check for precomputed FreeSurfer if required
-    if tool in ['fmriprep', 'meld_graph'] and getattr(args, 'use_precomputed_fs', False):
+    # fMRIPrep now requires pre-computed FreeSurfer outputs by default
+    if tool == 'fmriprep':
+        allow_fs_reconall = getattr(args, 'fmriprep_reconall', False)
+        
+        if not allow_fs_reconall:
+            # FreeSurfer is required unless user explicitly allows reconstruction
+            from ln2t_tools.utils.defaults import DEFAULT_FMRIPREP_FS_VERSION
+            fs_version = DEFAULT_FMRIPREP_FS_VERSION
+            fs_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
+            
+            logger.info(f"  [sub-{participant_label}] Checking FreeSurfer outputs on HPC (required by default): {fs_path}")
+            
+            if not check_remote_path_exists(username, hostname, keyfile, gateway, fs_path):
+                logger.warning(f"[sub-{participant_label}] Required FreeSurfer outputs not found on HPC: {fs_path}")
+                local_fs = Path.home() / "derivatives" / f"{dataset}-derivatives" / f"freesurfer_{fs_version}"
+                if local_fs.exists():
+                    if not prompt_upload_data(str(local_fs), fs_path, username, hostname, keyfile, gateway, participant_label):
+                        return False
+                else:
+                    print(f"\n✗ [sub-{participant_label}] FreeSurfer outputs not found on HPC: {fs_path}")
+                    print(f"   fMRIPrep now requires pre-computed FreeSurfer outputs by default.")
+                    print(f"   Either:")
+                    print(f"     1. Run FreeSurfer first: ln2t_tools freesurfer --dataset {dataset} --participant-label {participant_label}")
+                    print(f"     2. Use --fmriprep-reconall to allow fMRIPrep to run FreeSurfer reconstruction")
+                    return False
+            else:
+                logger.info(f"  [sub-{participant_label}] ✓ FreeSurfer outputs found on HPC")
+        else:
+            logger.info(f"  [sub-{participant_label}] --fmriprep-reconall enabled, will allow FreeSurfer reconstruction if needed")
+    
+    # Check for precomputed FreeSurfer if meld_graph requires it
+    elif tool == 'meld_graph' and getattr(args, 'use_precomputed_fs', False):
         fs_version = getattr(args, 'fs_version', '7.2.0')
         fs_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
         
@@ -1228,29 +1259,73 @@ apptainer exec {gpu_flag} \\
 """
     
     elif tool == "fmriprep":
+        from ln2t_tools.utils.defaults import DEFAULT_FMRIPREP_FS_VERSION
         version = getattr(args, 'version', '25.1.4')
+        fs_version = DEFAULT_FMRIPREP_FS_VERSION
         fs_license = getattr(args, 'hpc_fs_license', None) or '$HOME/licenses/license.txt'
+        allow_fs_reconall = getattr(args, 'fmriprep_reconall', False)
         apptainer_img = f"{hpc_apptainer_dir}/nipreps.fmriprep.{version}.sif"
         output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/fmriprep_{version}"
+        fs_output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/freesurfer_{fs_version}"
         
-        script += f"""
-# fMRIPrep setup
+        # Handle FreeSurfer inputs based on --fmriprep-reconall flag
+        if allow_fs_reconall:
+            # User allows fMRIPrep to run reconstruction
+            script += f"""
+# fMRIPrep setup - allowing FreeSurfer reconstruction
 FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 WORK_DIR="$OUTPUT_DIR/work"
 mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
 
-# Run fMRIPrep
+# Run fMRIPrep (will run FreeSurfer if needed)
 apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
     --env FS_LICENSE=/opt/freesurfer/license.txt \\
+    --cleanenv \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
     -w /work \\
+    --skip-bids-validation \\
+    $TOOL_ARGS
+"""
+        else:
+            # FreeSurfer is pre-computed and required
+            script += f"""
+# fMRIPrep setup - using pre-computed FreeSurfer
+FS_LICENSE="{fs_license}"
+OUTPUT_DIR="{output_dir}"
+FS_SUBJECTS_DIR="{fs_output_dir}"
+WORK_DIR="$OUTPUT_DIR/work"
+mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
+
+# Check that FreeSurfer directory exists
+if [ ! -d "$FS_SUBJECTS_DIR" ]; then
+    echo "ERROR: FreeSurfer outputs not found at $FS_SUBJECTS_DIR"
+    echo "fMRIPrep now requires pre-computed FreeSurfer outputs by default."
+    echo "Either run FreeSurfer first or use --fmriprep-reconall to allow reconstruction."
+    exit 1
+fi
+
+# Run fMRIPrep with pre-computed FreeSurfer outputs
+apptainer run \\
+    -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
+    -B "$OUTPUT_DIR:/out" \\
+    -B "$WORK_DIR:/work" \\
+    -B "$FS_SUBJECTS_DIR:/fsdir:ro" \\
+    -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
+    --env FS_LICENSE=/opt/freesurfer/license.txt \\
+    --env SUBJECTS_DIR=/fsdir \\
+    --cleanenv \\
+    {apptainer_img} \\
+    /data /out participant \\
+    --participant-label {participant_label} \\
+    -w /work \\
+    --fs-subjects-dir /fsdir \\
     --skip-bids-validation \\
     $TOOL_ARGS
 """
