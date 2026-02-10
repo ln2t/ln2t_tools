@@ -566,7 +566,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             fs_flag = ""
         
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run "
             f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
             f"/data /derivatives participant "
@@ -581,16 +581,21 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         if "fs_license" not in options:
             raise ValueError("FreeSurfer license file path is required")
         
+        # QSIPrep requires work directory and clean environment
+        workdir = os.environ.get('HOME', '/tmp')
+        
         cmd = (
             f"apptainer run --cleanenv --containall "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/out "
+            f"-B {workdir}:/tmp/work "
             f"{options['apptainer_img']} "
             f"/data /out participant "
             f"--participant-label {options['participant_label']} "
             f"--fs-license-file /opt/freesurfer/license.txt "
-            f"--skip-bids-validation"
+            f"--skip-bids-validation "
+            f"--work-dir /tmp/work/work"
         )
         if tool_args:
             cmd += f" {tool_args}"
@@ -605,7 +610,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             raise ValueError("qsiprep_dir is required for QSIRecon")
         
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
             f"-B {qsiprep_dir}:/data:ro "
             f"-B {options['derivatives']}:/out "
@@ -695,7 +700,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             raise ValueError("fmriprep_dir is required for CVRmap")
         
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run "
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/derivatives "
             f"-B {fmriprep_dir}:/fmriprep:ro "
@@ -720,7 +725,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         ]
         
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run "
             f"{' '.join(bindings)} "
             f"{options['apptainer_img']} "
             f"-f /fsdir "
@@ -734,7 +739,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
     elif tool == "bids_validator":
         # BIDS Validator for dataset validation
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run "
             f"-B {options['rawdata']}:/data:ro "
             f"{options['apptainer_img']} "
             f"/data"

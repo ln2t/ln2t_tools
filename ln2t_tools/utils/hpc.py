@@ -1247,7 +1247,6 @@ apptainer run \\
     -B "$WORK_DIR:/work" \\
     -B "$FS_LICENSE:/opt/freesurfer/license.txt:ro" \\
     --env FS_LICENSE=/opt/freesurfer/license.txt \\
-    --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1264,20 +1263,20 @@ apptainer run \\
         script += f"""
 # QSIPrep setup
 OUTPUT_DIR="{output_dir}"
-WORK_DIR="$OUTPUT_DIR/work"
+WORK_DIR="$GLOBALSCRATCH/qsiprep_work"
 mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
 
 # Run QSIPrep
 apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
-    -B "$WORK_DIR:/work" \\
+    -B "$WORK_DIR:/tmp/work" \\
     --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
-    -w /work \\
     --skip-bids-validation \\
+    --work-dir /tmp/work/work \\
     $TOOL_ARGS
 
 """
@@ -1302,7 +1301,6 @@ apptainer run \\
     -B "$QSIPREP_DIR:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
-    --cleanenv --containall \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1385,7 +1383,6 @@ apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$DERIVATIVES_DIR:/derivatives" \\
     -B "$FMRIPREP_DIR:/fmriprep:ro" \\
-    --cleanenv --containall \\
     {apptainer_img} \\
     /data /derivatives/$OUTPUT_LABEL participant \\
     --participant-label {participant_label} \\
