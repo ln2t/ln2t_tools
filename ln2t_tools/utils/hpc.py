@@ -990,18 +990,19 @@ def check_required_data(tool: str, dataset: str, participant_label: str, args: A
             # FreeSurfer is required unless user explicitly allows reconstruction
             from ln2t_tools.utils.defaults import DEFAULT_FMRIPREP_FS_VERSION
             fs_version = DEFAULT_FMRIPREP_FS_VERSION
-            fs_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
+            fs_base_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
+            fs_subject_path = f"{fs_base_path}/sub-{participant_label}"
             
-            logger.info(f"  [sub-{participant_label}] Checking FreeSurfer outputs on HPC (required by default): {fs_path}")
+            logger.info(f"  [sub-{participant_label}] Checking FreeSurfer outputs on HPC (required by default): {fs_subject_path}")
             
-            if not check_remote_path_exists(username, hostname, keyfile, gateway, fs_path):
-                logger.warning(f"[sub-{participant_label}] Required FreeSurfer outputs not found on HPC: {fs_path}")
+            if not check_remote_path_exists(username, hostname, keyfile, gateway, fs_subject_path):
+                logger.warning(f"[sub-{participant_label}] Required FreeSurfer outputs not found on HPC: {fs_subject_path}")
                 local_fs = Path.home() / "derivatives" / f"{dataset}-derivatives" / f"freesurfer_{fs_version}"
                 if local_fs.exists():
-                    if not prompt_upload_data(str(local_fs), fs_path, username, hostname, keyfile, gateway, participant_label):
+                    if not prompt_upload_data(str(local_fs), fs_base_path, username, hostname, keyfile, gateway, participant_label):
                         return False
                 else:
-                    print(f"\n✗ [sub-{participant_label}] FreeSurfer outputs not found on HPC: {fs_path}")
+                    print(f"\n✗ [sub-{participant_label}] FreeSurfer outputs not found on HPC: {fs_subject_path}")
                     print(f"   fMRIPrep now requires pre-computed FreeSurfer outputs by default.")
                     print(f"   Either:")
                     print(f"     1. Run FreeSurfer first: ln2t_tools freesurfer --dataset {dataset} --participant-label {participant_label}")
@@ -1015,15 +1016,16 @@ def check_required_data(tool: str, dataset: str, participant_label: str, args: A
     # Check for precomputed FreeSurfer if meld_graph requires it
     elif tool == 'meld_graph' and getattr(args, 'use_precomputed_fs', False):
         fs_version = getattr(args, 'fs_version', '7.2.0')
-        fs_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
+        fs_base_path = f"{hpc_derivatives_check}/{dataset}-derivatives/freesurfer_{fs_version}"
+        fs_subject_path = f"{fs_base_path}/sub-{participant_label}"
         
-        logger.info(f"  [sub-{participant_label}] Checking FreeSurfer outputs on HPC: {fs_path}")
+        logger.info(f"  [sub-{participant_label}] Checking FreeSurfer outputs on HPC: {fs_subject_path}")
         
-        if not check_remote_path_exists(username, hostname, keyfile, gateway, fs_path):
-            logger.warning(f"[sub-{participant_label}] Required FreeSurfer outputs not found on HPC: {fs_path}")
+        if not check_remote_path_exists(username, hostname, keyfile, gateway, fs_subject_path):
+            logger.warning(f"[sub-{participant_label}] Required FreeSurfer outputs not found on HPC: {fs_subject_path}")
             local_fs = Path.home() / "derivatives" / f"{dataset}-derivatives" / f"freesurfer_{fs_version}"
             if local_fs.exists():
-                if not prompt_upload_data(str(local_fs), fs_path, username, hostname, keyfile, gateway, participant_label):
+                if not prompt_upload_data(str(local_fs), fs_base_path, username, hostname, keyfile, gateway, participant_label):
                     return False
             else:
                 print(f"\n✗ [sub-{participant_label}] FreeSurfer outputs not found locally at {local_fs}")
