@@ -1293,10 +1293,15 @@ def process_qsirecon_subject(
     Args:
         layout: BIDSLayout object for BIDS dataset
         participant_label: Subject ID without 'sub-' prefix
-        args: Parsed command line arguments
+        args: Parsed command line arguments (tool-specific options via --tool-args)
         dataset_rawdata: Path to BIDS rawdata directory
         dataset_derivatives: Path to derivatives directory
         apptainer_img: Path to Apptainer image
+    
+    Note:
+        QSIRecon-specific options (--recon-spec, --nprocs, --omp-nthreads, etc.)
+        should be passed via --tool-args. Example:
+            --tool-args "--recon-spec dsi_studio_autotrack --nprocs 8"
     """
     # QSIRecon requires QSIPrep preprocessed data
     # Check for QSIPrep derivatives
@@ -1335,6 +1340,7 @@ def process_qsirecon_subject(
     logger.info(f"Using QSIPrep data from: {qsiprep_dir}")
 
     # Build and launch QSIRecon command
+    # Tool-specific options (--recon-spec, --nprocs, etc.) are passed via --tool-args
     output_dir = dataset_derivatives / (args.output_label or f"qsirecon_{args.version or DEFAULT_QSIRECON_VERSION}")
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -1345,10 +1351,7 @@ def process_qsirecon_subject(
         derivatives=str(output_dir),
         participant_label=participant_label,
         apptainer_img=apptainer_img,
-        recon_spec=getattr(args, 'recon_spec', 'mrtrix_multishell_msmt_ACT-hsvs'),
-        nprocs=getattr(args, 'nprocs', 8),
-        omp_nthreads=getattr(args, 'omp_nthreads', 8),
-        additional_options=getattr(args, 'additional_options', '')
+        tool_args=getattr(args, 'tool_args', '')
     )
     launch_and_check(apptainer_cmd, "QSIRecon", participant_label)
 
