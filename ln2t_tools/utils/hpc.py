@@ -1385,7 +1385,6 @@ apptainer run --containall \\
     /data /out participant \\
     --participant-label {participant_label} \\
     -w /work \\
-    --skip-bids-validation \\
     $TOOL_ARGS
 """
     

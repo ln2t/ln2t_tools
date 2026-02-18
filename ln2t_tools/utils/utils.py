@@ -590,7 +590,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/out "
             f"-B {workdir}:/tmp/work "
-            f"{options['apptainer_img']} "
+            f"{options['apptainer_img']} " 
             f"/data /out participant "
             f"--participant-label {options['participant_label']} "
             f"--fs-license-file /opt/freesurfer/license.txt "
@@ -639,8 +639,7 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"{options['apptainer_img']} "
             f"/data /out participant "
             f"--participant-label {options['participant_label']} "
-            f"--fs-license-file /opt/freesurfer/license.txt "
-            f"--skip-bids-validation"
+            f"--fs-license-file /opt/freesurfer/license.txt"
         )
         if tool_args:
             cmd += f" {tool_args}"
