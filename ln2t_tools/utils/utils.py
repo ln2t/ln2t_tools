@@ -621,11 +621,17 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         if qsiprep_path.parent.name.endswith('-derivatives'):
             dataset_name = qsiprep_path.parent.name.replace('-derivatives', '')
         
+        # Create QSIRecon work directory on the host to avoid filling output directory
+        workdir = os.environ.get('HOME', '/tmp')
+        qsirecon_workdir = Path(workdir) / '.qsirecon_work'
+        qsirecon_workdir.mkdir(parents=True, exist_ok=True)
+        
         # Build bindings list
         bindings = [
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt",
             f"-B {qsiprep_dir}:/data:ro",
-            f"-B {options['derivatives']}:/out"
+            f"-B {options['derivatives']}:/out",
+            f"-B {qsirecon_workdir}:/work"
         ]
         
         # Add code directory binding if dataset_name is available
@@ -639,7 +645,8 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             f"{options['apptainer_img']} "
             f"/data /out participant "
             f"--participant-label {options['participant_label']} "
-            f"--fs-license-file /opt/freesurfer/license.txt"
+            f"--fs-license-file /opt/freesurfer/license.txt "
+            f"-w /work"
         )
         if tool_args:
             cmd += f" {tool_args}"
