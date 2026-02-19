@@ -1036,7 +1036,9 @@ def check_required_data(tool: str, dataset: str, participant_label: str, args: A
     
     # Check for QSIPrep outputs if running QSIRecon
     if tool == 'qsirecon':
-        qsiprep_version = getattr(args, 'qsiprep_version', '1.0.1')
+        from ln2t_tools.utils.defaults import DEFAULT_QSIPREP_VERSION
+        # QSIRecon requires QSIPrep v1.1.1
+        qsiprep_version = getattr(args, 'qsiprep_version', DEFAULT_QSIPREP_VERSION)
         qsiprep_path = f"{hpc_derivatives_check}/{dataset}-derivatives/qsiprep_{qsiprep_version}"
         
         logger.info(f"  [sub-{participant_label}] Checking QSIPrep outputs on HPC: {qsiprep_path}")
@@ -1362,27 +1364,33 @@ apptainer run \\
         from ln2t_tools.utils.defaults import DEFAULT_QSIPREP_VERSION
         
         version = getattr(args, 'version', '1.1.1')
+        fs_license = getattr(args, 'hpc_fs_license', None) or '$HOME/licenses/license.txt'
         apptainer_img = f"{hpc_apptainer_dir}/pennlinc.qsirecon.{version}.sif"
         output_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/qsirecon_{version}"
         qsiprep_dir = f"$HPC_DERIVATIVES/$DATASET-derivatives/qsiprep_{DEFAULT_QSIPREP_VERSION}"
+        code_dir = f"$GLOBALSCRATCH/code/$DATASET-code"
         
         script += f"""
 # QSIRecon setup
+FS_LICENSE="{fs_license}"
 OUTPUT_DIR="{output_dir}"
 QSIPREP_DIR="{qsiprep_dir}"
+CODE_DIR="{code_dir}"
 WORK_DIR="$OUTPUT_DIR/work"
 mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
 
 # Run QSIRecon
-apptainer run \\
+apptainer run --containall --writable-tmpfs \\
+    -B "$FS_LICENSE:/opt/freesurfer/license.txt" \\
     -B "$QSIPREP_DIR:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
+    -B "$CODE_DIR:/code:ro" \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
+    --fs-license-file /opt/freesurfer/license.txt \\
     -w /work \\
-    --skip-bids-validation \\
     $TOOL_ARGS
 """
     
@@ -1690,10 +1698,11 @@ def print_download_command(tool: str, dataset: str, args: Any, job_ids: List[str
     hpc_derivatives = resolve_hpc_env_var(hpc_derivatives, username, hostname, keyfile, gateway)
     
     # Determine version and output directory
+    from ln2t_tools.utils.defaults import DEFAULT_QSIPREP_VERSION
     version = getattr(args, 'version', {
         'freesurfer': '7.3.2',
         'fmriprep': '25.1.4',
-        'qsiprep': '1.0.1',
+        'qsiprep': DEFAULT_QSIPREP_VERSION,
         'qsirecon': '1.1.1',
         'meld_graph': 'v2.2.3',
         'cvrmap': '4.3.1'
