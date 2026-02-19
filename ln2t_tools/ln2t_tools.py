@@ -540,38 +540,6 @@ def handle_import(args):
     # Check if overwrite is enabled
     overwrite = getattr(args, 'overwrite', False)
     
-    # If not overwriting, check which participants already exist and filter them out
-    if not overwrite and args.participant_label:
-        existing_participants = []
-        new_participants = []
-        
-        for participant in args.participant_label:
-            participant_id = participant.replace('sub-', '')
-            subj_dir = rawdata_dir / f"sub-{participant_id}"
-            if subj_dir.exists():
-                existing_participants.append(participant)
-            else:
-                new_participants.append(participant)
-        
-        if existing_participants:
-            logger.warning(f"\n{'='*60}")
-            logger.warning("SKIPPING EXISTING PARTICIPANTS")
-            logger.warning(f"{'='*60}")
-            logger.warning(f"The following {len(existing_participants)} participant(s) already have imported data:")
-            for p in existing_participants:
-                logger.warning(f"  - {p}")
-            logger.warning("")
-            logger.warning("To overwrite existing data, use --overwrite flag:")
-            logger.warning(f"  ln2t_tools import --dataset {dataset} --overwrite --participant-label {' '.join(existing_participants)}")
-            logger.warning(f"{'='*60}\n")
-        
-        if new_participants:
-            logger.info(f"Will import {len(new_participants)} new participant(s): {new_participants}")
-            args.participant_label = new_participants
-        else:
-            logger.info("No new participants to import. Exiting.")
-            return
-    
     for datatype in datatypes:
         logger.info(f"\n{'='*60}")
         logger.info(f"Processing {datatype.upper()} data")

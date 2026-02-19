@@ -773,14 +773,19 @@ def import_mrs(
         new_participants = []
         for participant in participant_labels:
             participant_id = participant.replace('sub-', '')
-            subj_dir = rawdata_dir / f"sub-{participant_id}"
-            if subj_dir.exists():
-                logger.info(f"Participant {participant_id} already imported, skipping (use --overwrite to re-process)")
+            # Check if MRS data already exists for this participant
+            if session:
+                mrs_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "mrs"
+            else:
+                mrs_dir = rawdata_dir / f"sub-{participant_id}" / "mrs"
+            
+            if mrs_dir.exists():
+                logger.info(f"Participant {participant_id} already has MRS data, skipping (use --overwrite to re-process)")
             else:
                 new_participants.append(participant)
         
         if not new_participants:
-            logger.info("All participants already imported. Skipping MRS import.")
+            logger.info("All participants already have MRS data. Skipping MRS import.")
             return True
         
         participant_labels = new_participants

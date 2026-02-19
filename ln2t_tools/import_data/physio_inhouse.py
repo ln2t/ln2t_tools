@@ -696,14 +696,19 @@ def import_physio_inhouse(
         new_participants = []
         for participant in participant_labels:
             participant_id = participant.replace('sub-', '')
-            subj_dir = rawdata_dir / f"sub-{participant_id}"
-            if subj_dir.exists():
-                logger.info(f"Participant {participant_id} already imported, skipping (use --overwrite to re-process)")
+            # Check if physio data already exists for this participant
+            if session:
+                physio_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "physio"
+            else:
+                physio_dir = rawdata_dir / f"sub-{participant_id}" / "physio"
+            
+            if physio_dir.exists():
+                logger.info(f"Participant {participant_id} already has physio data, skipping (use --overwrite to re-process)")
             else:
                 new_participants.append(participant)
         
         if not new_participants:
-            logger.info("All participants already imported. Skipping physio import.")
+            logger.info("All participants already have physio data. Skipping physio import.")
             return True
         
         participant_labels = new_participants
