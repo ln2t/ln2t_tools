@@ -327,14 +327,19 @@ def import_dicom(
         new_participants = []
         for participant in participant_labels:
             participant_id = participant.replace('sub-', '')
-            subj_dir = rawdata_dir / f"sub-{participant_id}"
-            if subj_dir.exists():
-                logger.info(f"Participant {participant_id} already imported, skipping (use --overwrite to re-process)")
+            # Check if anatomical (anat) data already exists for this participant
+            if session:
+                anat_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "anat"
+            else:
+                anat_dir = rawdata_dir / f"sub-{participant_id}" / "anat"
+            
+            if anat_dir.exists():
+                logger.info(f"Participant {participant_id} already has DICOM data, skipping (use --overwrite to re-process)")
             else:
                 new_participants.append(participant)
         
         if not new_participants:
-            logger.info("All participants already imported. Skipping DICOM import.")
+            logger.info("All participants already have DICOM data. Skipping DICOM import.")
             return True
         
         participant_labels = new_participants
