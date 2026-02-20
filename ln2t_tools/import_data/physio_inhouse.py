@@ -691,28 +691,6 @@ def import_physio_inhouse(
             ds_initials = ''.join([w[0].upper() for w in words if w])
             logger.info(f"Inferred dataset initials: {ds_initials}")
     
-    # Filter out existing participants unless overwrite is enabled
-    if not overwrite:
-        new_participants = []
-        for participant in participant_labels:
-            participant_id = participant.replace('sub-', '')
-            # Check if physio data already exists for this participant
-            if session:
-                physio_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "physio"
-            else:
-                physio_dir = rawdata_dir / f"sub-{participant_id}" / "physio"
-            
-            if physio_dir.exists():
-                logger.info(f"Participant {participant_id} already has physio data, skipping (use --overwrite to re-process)")
-            else:
-                new_participants.append(participant)
-        
-        if not new_participants:
-            logger.info("All participants already have physio data. Skipping physio import.")
-            return True
-        
-        participant_labels = new_participants
-    
     # Process each participant
     success_count = 0
     failed_participants = []
