@@ -135,14 +135,6 @@ Here is the list of currently supported tools available to the lab members - for
 
 Note that there is another tool, `ln2t_tools import`, designed to deal with the BIDS-ification of source data. This tool is for administrators only (if you try it it will fail).
 
-## Using HPC
-
-The main neuroimaging tools in `ln2t_tools` like `FreeSurfer`, `fMRIPrep`, `QSIPrep` and `QSIRecon` can be submitted to HPC clusters using SLURM (Simple Linux Utility for Resource Management) using `--hpc`. A typical command look like
-```bash
-ln2t_tools <pipeline> --dataset <dataset> --hpc --hpc-host <host> --hpc-user <user> --hpc-time 10:00:00
-```
-`ln2t_tools` will then search for pre-installed SSH keys to interact with the cluster. Data, apptainer images and code will by default be assumed to be located on `$GLOBALSCRATCH`, which is typically an environment variable defined on the cluster. Logs of `ln2t_tools` are in your cluster home folder.
-
 ## Data organization
 
 `ln2t_tools` essentially follows the [BIDS (Brain Imaging Data Structure) specification](https://bids-specification.readthedocs.io/) for organizing neuroimaging data, and what follow is essential for the tool to work:
@@ -152,6 +144,14 @@ ln2t_tools <pipeline> --dataset <dataset> --hpc --hpc-host <host> --hpc-user <us
 - **Code**: `~/code/{dataset}-code` | The golden spot to put your custom code and configurations. We recommend that you keep there a `README.md` file with copies of the command lines you use - this can be very useful to keep track of your work or to re-run analyzes. Moreover, this folder is made available to the tools that require a configuration file (such a `qsirecon`).
 
 A part from that, there is also a similar structure for the source data (data as exported from the scanner or any other recording device), but these are not generally made available to the users - all you need should be in the raw data.
+
+## Using HPC
+
+The main neuroimaging tools in `ln2t_tools` like `FreeSurfer`, `fMRIPrep`, `QSIPrep` and `QSIRecon` can be submitted to HPC clusters using SLURM (Simple Linux Utility for Resource Management) using `--hpc`. A typical command look like
+```bash
+ln2t_tools <pipeline> --dataset <dataset> --hpc --hpc-host <host> --hpc-user <user> --hpc-time 10:00:00
+```
+`ln2t_tools` will then search for pre-installed SSH keys to interact with the cluster. Data, apptainer images and code will by default be assumed to be located on `$GLOBALSCRATCH`, which is typically an environment variable defined on the cluster. Logs of `ln2t_tools` are in your cluster home folder.
 
 ### Directory Structure
 
