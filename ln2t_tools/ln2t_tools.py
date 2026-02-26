@@ -388,7 +388,8 @@ def handle_import(args):
                 mrraw_dir=getattr(args, 'mrraw_dir', None),
                 tmp_dir=getattr(args, 'mrs_tmp_dir', None),
                 tolerance_hours=getattr(args, 'pre_import_tolerance_hours', None) or 1.0,
-                dry_run=getattr(args, 'dry_run', False)
+                dry_run=getattr(args, 'dry_run', False),
+                only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
             
             if pre_import_success:
@@ -424,7 +425,8 @@ def handle_import(args):
                 backup_dir=getattr(args, 'physio_backup_dir', None),
                 tolerance_hours=getattr(args, 'pre_import_tolerance_hours', None) or 1.0,
                 dry_run=getattr(args, 'dry_run', False),
-                physio_config=getattr(args, 'physio_config', None)
+                physio_config=getattr(args, 'physio_config', None),
+                only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
             
             if pre_import_success:
@@ -504,7 +506,8 @@ def handle_import(args):
                 session=getattr(args, 'session', None),
                 compress_source=compress_source,
                 venv_path=venv_path,
-                overwrite=overwrite
+                overwrite=overwrite,
+                only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
         
         elif datatype == 'physio':
@@ -528,7 +531,8 @@ def handle_import(args):
                 physio_config=getattr(args, 'physio_config', None),
                 apptainer_dir=apptainer_dir,
                 matching_tolerance_sec=getattr(args, 'matching_tolerance_sec', None),
-                overwrite=overwrite
+                overwrite=overwrite,
+                only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
         
         elif datatype == 'meg':

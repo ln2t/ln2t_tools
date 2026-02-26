@@ -93,7 +93,8 @@ def find_dicom_for_participant(
     dicom_dir: Path,
     participant_label: str,
     ds_initials: str,
-    session: Optional[str] = None
+    session: Optional[str] = None,
+    only_uncompressed: bool = False
 ) -> Optional[Path]:
     """Find a DICOM file for a given participant.
     
@@ -107,6 +108,9 @@ def find_dicom_for_participant(
         Dataset initials (e.g., 'CB', 'HP')
     session : Optional[str]
         Session label (without 'ses-' prefix)
+    only_uncompressed : bool
+        If True, only accept uncompressed folders and skip archives.
+        Default: False
         
     Returns
     -------
@@ -122,21 +126,25 @@ def find_dicom_for_participant(
     # Check for directory
     source_path = dicom_dir / source_name
     if not source_path.exists():
-        # Try extracting from archive
-        archive_path = dicom_dir / f"{source_name}.tar.gz"
-        if archive_path.exists():
-            logger.info(f"Extracting DICOM archive for metadata: {archive_path.name}")
-            try:
-                with tarfile.open(archive_path, 'r:gz') as tar:
-                    tar.extractall(path=dicom_dir)
-                if not source_path.exists():
-                    logger.error(f"Extracted archive but {source_name} not found")
+        # Try extracting from archive (unless only_uncompressed is set)
+        if not only_uncompressed:
+            archive_path = dicom_dir / f"{source_name}.tar.gz"
+            if archive_path.exists():
+                logger.info(f"Extracting DICOM archive for metadata: {archive_path.name}")
+                try:
+                    with tarfile.open(archive_path, 'r:gz') as tar:
+                        tar.extractall(path=dicom_dir)
+                    if not source_path.exists():
+                        logger.error(f"Extracted archive but {source_name} not found")
+                        return None
+                except Exception as e:
+                    logger.error(f"Failed to extract DICOM archive: {e}")
                     return None
-            except Exception as e:
-                logger.error(f"Failed to extract DICOM archive: {e}")
+            else:
+                logger.error(f"DICOM source not found: {source_name}")
                 return None
         else:
-            logger.error(f"DICOM source not found: {source_name}")
+            logger.error(f"DICOM source not found: {source_name} (--only-uncompressed is active)")
             return None
     
     # Find a DICOM file (any will do, metadata should be consistent)
@@ -269,7 +277,8 @@ def pre_import_mrs(
     mrraw_dir: Optional[Path] = None,
     tmp_dir: Optional[Path] = None,
     tolerance_hours: float = 1.0,
-    dry_run: bool = False
+    dry_run: bool = False,
+    only_uncompressed: bool = False
 ) -> bool:
     """Pre-import MRS data: gather P-files from scanner backup locations.
     
@@ -299,6 +308,9 @@ def pre_import_mrs(
         Time tolerance in hours for matching P-files by datetime
     dry_run : bool
         If True, only report what would be done without copying files
+    only_uncompressed : bool
+        If True, only check for uncompressed DICOM folders and disregard archives.
+        Default: False
         
     Returns
     -------
@@ -341,7 +353,7 @@ def pre_import_mrs(
         
         # Step 1: Find DICOM file and extract metadata
         dicom_file = find_dicom_for_participant(
-            dicom_dir, participant_id, ds_initials, session
+            dicom_dir, participant_id, ds_initials, session, only_uncompressed=only_uncompressed
         )
         
         if dicom_file is None:
@@ -447,7 +459,8 @@ def pre_import_mrs(
 
 def discover_participants_from_mrs_dir(
     mrs_dir: Path,
-    ds_initials: str
+    ds_initials: str,
+    only_uncompressed: bool = False
 ) -> List[str]:
     """Discover participant labels from MRS directory.
     
@@ -460,6 +473,10 @@ def discover_participants_from_mrs_dir(
         Path to mrs directory (e.g., sourcedata/mrs or sourcedata/pfiles)
     ds_initials : str
         Dataset initials prefix (e.g., 'CB', 'HP')
+    only_uncompressed : bool
+        If True, only consider uncompressed folders (e.g., AB001) and skip
+        .tar.gz archives. If False, consider both folders and archives.
+        Default: False
         
     Returns
     -------
@@ -469,13 +486,18 @@ def discover_participants_from_mrs_dir(
     participants = set()
     
     # Pattern: {ds_initials}* (e.g., CB001, CB002, HP042SES1)
-    # Look for both directories and .tar.gz archives
+    # Look for both directories and .tar.gz archives (or only directories if only_uncompressed=True)
     
     for item in mrs_dir.iterdir():
         name = item.name
+        is_archive = name.endswith('.tar.gz')
+        
+        # Skip archives if only_uncompressed is True
+        if is_archive and only_uncompressed:
+            continue
         
         # Remove .tar.gz extension if present
-        if name.endswith('.tar.gz'):
+        if is_archive:
             name = name[:-7]  # Remove '.tar.gz'
         
         # Check if it starts with the dataset initials
@@ -613,7 +635,8 @@ def create_verified_archive(source_path: Path, archive_path: Path) -> bool:
 
 def extract_archive_if_needed(
     mrs_dir: Path,
-    source_name: str
+    source_name: str,
+    only_uncompressed: bool = False
 ) -> Tuple[Optional[Path], bool]:
     """Extract archive if directory doesn't exist but archive does.
     
@@ -623,6 +646,10 @@ def extract_archive_if_needed(
         Path to mrs directory
     source_name : str
         Name of the source directory (e.g., 'CB042')
+    only_uncompressed : bool
+        If True, only accept uncompressed folders and skip archives.
+        If False, extract from archive if folder doesn't exist.
+        Default: False
         
     Returns
     -------
@@ -635,6 +662,11 @@ def extract_archive_if_needed(
     # If directory exists, use it directly
     if source_path.exists():
         return source_path, False
+    
+    # If only_uncompressed is True, don't use archives
+    if only_uncompressed:
+        logger.debug(f"--only-uncompressed is set, skipping archive check for {source_name}")
+        return None, False
     
     # If archive exists, extract it
     if archive_path.exists():
@@ -667,7 +699,8 @@ def import_mrs(
     session: Optional[str] = None,
     compress_source: bool = True,
     venv_path: Optional[Path] = None,
-    overwrite: bool = False
+    overwrite: bool = False,
+    only_uncompressed: bool = False
 ) -> bool:
     """Import MRS data to BIDS format using spec2bids.
     
@@ -696,6 +729,9 @@ def import_mrs(
         Path to virtual environment containing spec2nii
     overwrite : bool
         If True, overwrite existing participant data. If False, skip existing participants.
+    only_uncompressed : bool
+        If True, only check for uncompressed folders and disregard compressed archives.
+        Default: False
         
     Returns
     -------
@@ -762,7 +798,7 @@ def import_mrs(
     # Discover participants if not provided
     if participant_labels is None or len(participant_labels) == 0:
         logger.info("No participant labels provided, discovering from MRS directory...")
-        participant_labels = discover_participants_from_mrs_dir(mrs_dir, ds_initials)
+        participant_labels = discover_participants_from_mrs_dir(mrs_dir, ds_initials, only_uncompressed=only_uncompressed)
         
         if not participant_labels:
             logger.error(f"No participants found in {mrs_dir} matching pattern {ds_initials}*")
@@ -850,10 +886,13 @@ def import_mrs(
             source_name = f"{ds_initials}{participant_id}"
         
         # Try to get source path (extract from archive if needed)
-        source_path, was_extracted = extract_archive_if_needed(mrs_dir, source_name)
+        source_path, was_extracted = extract_archive_if_needed(mrs_dir, source_name, only_uncompressed=only_uncompressed)
         
         if source_path is None:
-            logger.error(f"Source MRS not found: {source_name} (checked directory and .tar.gz archive)")
+            if only_uncompressed:
+                logger.error(f"Source MRS not found: {source_name} (checked directory only, --only-uncompressed is active)")
+            else:
+                logger.error(f"Source MRS not found: {source_name} (checked directory and .tar.gz archive)")
             logger.error(f"Expected naming convention: {ds_initials}{participant_id}" + 
                        (f"SES{session}" if session else ""))
             failed_participants.append(participant_id)

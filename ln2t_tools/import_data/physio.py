@@ -33,7 +33,8 @@ def import_physio(
     physio_config: Optional[Path] = None,
     apptainer_dir: Path = Path("/opt/apptainer"),
     matching_tolerance_sec: Optional[float] = None,
-    overwrite: bool = False
+    overwrite: bool = False,
+    only_uncompressed: bool = False
 ) -> bool:
     """Import physiological data to BIDS format.
     
@@ -66,6 +67,9 @@ def import_physio(
         If not provided, uses config value or default (35.0s).
     overwrite : bool
         If True, overwrite existing participant data. If False, skip existing participants.
+    only_uncompressed : bool
+        If True, only check for uncompressed source folders and disregard archives.
+        Default: False
         
     Returns
     -------
@@ -893,7 +897,8 @@ def pre_import_physio(
     backup_dir: Optional[Path] = None,
     tolerance_hours: float = 1.0,
     dry_run: bool = False,
-    physio_config: Optional[Path] = None
+    physio_config: Optional[Path] = None,
+    only_uncompressed: bool = False
 ) -> bool:
     """Pre-import physio data: gather physio files from scanner backup location.
     
@@ -928,6 +933,9 @@ def pre_import_physio(
         If True, only report what would be done without copying files
     physio_config : Optional[Path]
         Path to physio configuration file (overrides auto-detection)
+    only_uncompressed : bool
+        If True, only check for uncompressed DICOM folders and disregard archives.
+        Default: False
         
     Returns
     -------
@@ -991,7 +999,7 @@ def pre_import_physio(
         
         # Step 1: Find DICOM file and extract metadata
         dicom_file = find_dicom_for_participant(
-            dicom_dir, participant_id, ds_initials, session
+            dicom_dir, participant_id, ds_initials, session, only_uncompressed=only_uncompressed
         )
         
         if dicom_file is None:
