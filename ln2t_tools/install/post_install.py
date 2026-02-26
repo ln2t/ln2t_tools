@@ -1,7 +1,10 @@
 import os
 import site
 import shutil
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 def install_completion():
     """Install bash completion script during package installation."""
@@ -11,7 +14,7 @@ def install_completion():
         completion_source = pkg_dir / 'completion/ln2t_tools_completion.bash'
         
         if not completion_source.exists():
-            print(f"Warning: Completion script not found at {completion_source}")
+            logger.warning(f"Completion script not found at {completion_source}")
             return
 
         # Create user completion directory
@@ -35,11 +38,12 @@ def install_completion():
                     with open(bashrc, 'a') as f:
                         f.write(source_line)
         
-        print(f"Installed completion script to {completion_dest}")
+        logger.info(f"Installed completion script to {completion_dest}")
         
     except Exception as e:
-        print(f"Warning: Failed to install completion script: {e}")
+        logger.warning(f"Failed to install completion script: {e}")
         # Don't raise the exception - allow installation to continue
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     install_completion()

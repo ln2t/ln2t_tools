@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from bids import BIDSLayout
 
-from ln2t_tools.cli.cli import parse_args, setup_terminal_colors, configure_logging, log_minimal, MINIMAL
+from ln2t_tools.cli.cli import parse_args, setup_terminal_colors, configure_logging, log_minimal, MINIMAL, Colors, ColoredLoggerFormatter
 from ln2t_tools.utils.utils import (
     list_available_datasets,
     list_missing_subjects,
@@ -66,11 +66,12 @@ from ln2t_tools.utils.defaults import (
 from ln2t_tools.import_data import import_dicom, import_mrs, pre_import_mrs, import_physio, pre_import_physio, import_meg
 from ln2t_tools.import_data.dicom import discover_participants_from_dicom_dir
 
-# Setup initial logging (will be reconfigured based on --verbosity)
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Setup initial logging with colored formatter (will be reconfigured based on --verbosity)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredLoggerFormatter())
+root_logger.addHandler(handler)
 logger = logging.getLogger(__name__)
 
 def get_available_datasets(rawdata_dir: str) -> List[str]:

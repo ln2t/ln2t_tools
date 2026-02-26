@@ -13,6 +13,18 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import tempfile
 
+from ln2t_tools.cli.cli import (
+    Colors, 
+    print_colored_box, 
+    print_section_header, 
+    print_success, 
+    print_error, 
+    print_warning, 
+    print_info
+)
+
+from ln2t_tools.cli import Colors
+
 logger = logging.getLogger(__name__)
 
 # Global SSH ControlMaster state
@@ -471,33 +483,33 @@ def prompt_apptainer_build(
     remote_path = f"{hpc_apptainer_dir}/{image_name}"
     docker_uri = f"docker://{tool_owner}/{tool}:{version}"
     
-    # Check if local image exists
     local_apptainer_dir = Path(getattr(args, 'apptainer_dir', '/opt/apptainer'))
     local_image_path = local_apptainer_dir / image_name
     local_image_exists = local_image_path.exists()
     
-    print("\n" + "="*70)
-    print("⚠️  MISSING APPTAINER IMAGE ON HPC")
-    print("="*70)
-    print(f"\nThe required Apptainer image was not found on the cluster:")
-    print(f"  Tool: {tool}")
-    print(f"  Version: {version}")
-    print(f"  Expected path: {remote_path}")
-    print("")
+    logger = logging.getLogger(__name__)
+    
+    # Display missing image warning
+    print_section_header("MISSING APPTAINER IMAGE ON HPC", logger, logging.WARNING)
+    print_info(f"The required Apptainer image was not found on the cluster:", logger)
+    print_info(f"Tool: {tool}", logger, indent=1)
+    print_info(f"Version: {version}", logger, indent=1)
+    print_info(f"Expected path: {remote_path}", logger, indent=1)
+    print_info("", logger)
     
     # Show options based on whether local image exists
     if local_image_exists:
-        print("Options:")
-        print("  [1] Push local image to HPC (recommended - faster)")
-        print(f"      Local image found: {local_image_path}")
-        print("  [2] Submit a batch job to build the image on HPC")
-        print("  [3] Cancel and build manually")
-        print("")
+        print_info("Options:", logger)
+        print_info("[1] Push local image to HPC (recommended - faster)", logger, indent=1)
+        print_info(f"Local image found: {local_image_path}", logger, indent=2)
+        print_info("[2] Submit a batch job to build the image on HPC", logger, indent=1)
+        print_info("[3] Cancel and build manually", logger, indent=1)
+        print_info("", logger)
         response = input("Choose an option [1/2/3]: ").strip()
     else:
-        print("Building Apptainer images can be memory-intensive and may fail in")
-        print("interactive sessions. We recommend submitting a batch job to build it.")
-        print("")
+        print_info("Building Apptainer images can be memory-intensive and may fail in", logger)
+        print_info("interactive sessions. We recommend submitting a batch job to build it.", logger)
+        print_info("", logger)
         response = input("Would you like to submit a job to build the image? [y/N]: ").strip().lower()
         # Map y/n to 2/3 for unified handling
         if response == 'y':
@@ -507,11 +519,11 @@ def prompt_apptainer_build(
     
     # Option 1: Push local image to HPC
     if response == '1' and local_image_exists:
-        print(f"\nPushing local image to HPC...")
-        print(f"  Source: {local_image_path}")
-        print(f"  Destination: {username}@{hostname}:{remote_path}")
-        print("")
-        print("This may take a while depending on the image size and network speed...")
+        print_info(f"Pushing local image to HPC...", logger)
+        print_info(f"Source: {local_image_path}", logger, indent=1)
+        print_info(f"Destination: {username}@{hostname}:{remote_path}", logger, indent=1)
+        print_info("", logger)
+        print_info("This may take a while depending on the image size and network speed...", logger)
         
         try:
             # Create remote directory if it doesn't exist (use login shell for env var expansion)
@@ -532,17 +544,13 @@ def prompt_apptainer_build(
             result = subprocess.run(scp_cmd, capture_output=False)
             
             if result.returncode == 0:
-                print("\n" + "="*70)
-                print("✓ IMAGE PUSHED SUCCESSFULLY")
-                print("="*70)
-                print(f"\n  Image now available at: {remote_path}")
-                print("")
-                print("You can now re-run your original command.")
-                print("="*70 + "\n")
+                print_section_header("IMAGE PUSHED SUCCESSFULLY", logger, logging.INFO)
+                print_success(f"Image now available at: {remote_path}", logger)
+                print_info("You can now re-run your original command.", logger)
                 return True
             else:
-                print(f"\n✗ Failed to push image (exit code {result.returncode})")
-                print("Falling back to manual instructions...")
+                print_error(f"Failed to push image (exit code {result.returncode})", logger)
+                print_info("Falling back to manual instructions...", logger)
                 response = '3'
                 
         except subprocess.CalledProcessError as e:
@@ -570,7 +578,7 @@ def prompt_apptainer_build(
     # Option 2: Submit build job
     if response == '2':
         # Submit the job
-        print(f"\nSubmitting Apptainer build job...")
+        print_info(f"Submitting Apptainer build job...", logger)
         
         try:
             # Create temporary script file
@@ -608,20 +616,18 @@ def prompt_apptainer_build(
             with open(local_script_path, 'w') as f:
                 f.write(script_content)
             
-            print("\n" + "="*70)
-            print("✓ APPTAINER BUILD JOB SUBMITTED")
-            print("="*70)
+            # Display success message with formatted output
+            print_section_header("APPTAINER BUILD JOB SUBMITTED", logger, logging.INFO)
             if job_id:
-                print(f"\n  Job ID: {job_id}")
-            print(f"  Remote script: {remote_script}")
-            print(f"  Local copy: {local_script_path}")
-            print("")
-            print("Next steps:")
-            print(f"  1. Monitor the job: ssh {username}@{hostname} 'squeue -u {username}'")
-            print(f"  2. Check job output: ssh {username}@{hostname} 'cat ~/ln2t_hpc_jobs/apptainer_builds/*.out'")
-            print(f"  3. Once complete, re-run your original command")
-            print("")
-            print("="*70 + "\n")
+                print_info(f"Job ID: {job_id}", logger)
+            print_info(f"Remote script: {remote_script}", logger)
+            print_info(f"Local copy: {local_script_path}", logger)
+            print_info("", logger)
+            print_info("Next steps:", logger)
+            print_info(f"1. Monitor the job: ssh {username}@{hostname} 'squeue -u {username}'", logger, indent=1)
+            print_info(f"2. Check job output: ssh {username}@{hostname} 'cat ~/ln2t_hpc_jobs/apptainer_builds/*.out'", logger, indent=1)
+            print_info(f"3. Once complete, re-run your original command", logger, indent=1)
+            print_info("", logger)
             
             # Cleanup
             Path(temp_script).unlink(missing_ok=True)
@@ -1720,16 +1726,17 @@ def print_download_command(tool: str, dataset: str, args: Any, job_ids: List[str
     
     rsync_cmd = f"rsync -avz --progress {proxy_cmd} {username}@{hostname}:{remote_path} {local_path}"
     
-    print("\n" + "="*80)
-    print("HPC JOB SUBMISSION COMPLETE")
-    print("="*80)
-    print(f"\nSubmitted {len(job_ids)} job(s):")
+    logger.info("")
+    logger.info(f"{Colors.GREEN}{Colors.BOLD}{'='*80}{Colors.END}")
+    logger.info(f"{Colors.GREEN}{Colors.BOLD}HPC JOB SUBMISSION COMPLETE{Colors.END}")
+    logger.info(f"{Colors.GREEN}{Colors.BOLD}{'='*80}{Colors.END}")
+    logger.info(f"\n{Colors.BOLD}Submitted {len(job_ids)} job(s):{Colors.END}")
     for job_id in job_ids:
-        print(f"  - Job ID: {job_id}")
+        logger.info(f"  {Colors.CYAN}• Job ID: {job_id}{Colors.END}")
     
-    print(f"\nTo download results when jobs complete, run:")
-    print(f"\n{rsync_cmd}")
-    print("\n" + "="*80 + "\n")
+    logger.info(f"\n{Colors.BOLD}To download results when jobs complete, run:{Colors.END}")
+    logger.info(f"\n{Colors.YELLOW}{rsync_cmd}{Colors.END}")
+    logger.info(f"\n{Colors.GREEN}{Colors.BOLD}{'='*80}{Colors.END}\n")
 
 
 def check_job_status(job_id: str, username: str, hostname: str, keyfile: str, 

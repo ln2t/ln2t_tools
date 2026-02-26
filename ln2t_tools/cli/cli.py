@@ -5,7 +5,7 @@ import sys
 import logging
 import textwrap
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from types import TracebackType  # Add this import
 
 from ln2t_tools.utils.defaults import (
@@ -52,6 +52,44 @@ class ColoredHelpFormatter(argparse.RawDescriptionHelpFormatter):
         super().start_section(heading)
 
 
+class ColoredLoggerFormatter(logging.Formatter):
+    """Custom logging formatter with colored output based on log level."""
+
+    # Color codes for different log levels
+    LEVEL_COLORS = {
+        'DEBUG': Colors.CYAN,
+        'INFO': Colors.GREEN,
+        'MINIMAL': Colors.BLUE,
+        'WARNING': Colors.YELLOW,
+        'ERROR': Colors.RED,
+        'CRITICAL': f'{Colors.RED}{Colors.BOLD}',
+    }
+
+    def format(self, record):
+        # Get the base formatted message
+        if record.levelname == 'MINIMAL':
+            # For MINIMAL level, just show the message in blue
+            formatted = f"{Colors.BLUE}{record.getMessage()}{Colors.END}"
+        else:
+            # Color the level name
+            levelname = record.levelname
+            color = self.LEVEL_COLORS.get(levelname, Colors.END)
+            
+            # Format message with timestamp and colored level
+            timestamp = self.formatTime(record, self.datefmt) if hasattr(self, 'datefmt') else None
+            if timestamp:
+                formatted = f"{Colors.BOLD}{timestamp}{Colors.END} - {color}{Colors.BOLD}{levelname}{Colors.END} - {record.getMessage()}"
+            else:
+                formatted = f"{color}{Colors.BOLD}{levelname}{Colors.END}: {record.getMessage()}"
+        
+        # Add exception info if present
+        if record.exc_info:
+            exc_str = self.formatException(record.exc_info)
+            formatted += f"\n{Colors.RED}{exc_str}{Colors.END}"
+        
+        return formatted
+
+
 def configure_logging(verbosity: str) -> None:
     """Configure logging based on verbosity level.
     
@@ -74,35 +112,36 @@ def configure_logging(verbosity: str) -> None:
     
     level = level_map.get(verbosity, logging.INFO)
     
-    # Select formatter based on verbosity
+    # Create formatter based on verbosity
+    formatter = ColoredLoggerFormatter()
+    
+    # Set format string based on verbosity
     if verbosity == 'debug':
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    elif verbosity == 'minimal':
-        formatter = logging.Formatter('%(message)s')
-    elif verbosity == 'silent':
-        formatter = logging.Formatter('%(levelname)s: %(message)s')
-    else:  # verbose
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter.datefmt = '%Y-%m-%d %H:%M:%S'
+    elif verbosity in ['verbose', 'minimal']:
+        formatter.datefmt = '%Y-%m-%d %H:%M:%S'
+    else:  # silent
+        formatter.datefmt = None
     
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     
-    # Configure ln2t_tools logger specifically
-    ln2t_logger = logging.getLogger('ln2t_tools')
-    ln2t_logger.setLevel(level)
+    # Remove existing handlers to avoid duplicates
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
     
-    # Update all existing handlers
-    for handler in root_logger.handlers:
-        handler.setLevel(level)
-        handler.setFormatter(formatter)
+    # Add console handler with colored formatter
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
     
-    # If no handlers, add one
-    if not root_logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setLevel(level)
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
+    # Configure ln2t_tools and submodule loggers
+    for logger_name in ['ln2t_tools', 'ln2t_tools.cli', 'ln2t_tools.tools', 'ln2t_tools.utils', 'ln2t_tools.import_data']:
+        module_logger = logging.getLogger(logger_name)
+        module_logger.setLevel(level)
+        module_logger.propagate = True
 
 
 def log_minimal(logger, message: str) -> None:
@@ -118,6 +157,131 @@ def log_minimal(logger, message: str) -> None:
         Message to log
     """
     logger.log(MINIMAL, message)
+
+
+def print_colored_box(title: str, lines: List[str], logger: Optional[logging.Logger] = None, level: int = logging.INFO) -> None:
+    """Print a colored box with title and content.
+    
+    Parameters
+    ----------
+    title : str
+        Title of the box
+    lines : List[str]
+        Lines of content inside the box
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    level : int, optional
+        Log level (default: logging.INFO)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    divider = f"{Colors.GREEN}═{'═'*54}{Colors.END}"
+    header = f"{Colors.BOLD}{Colors.GREEN}╔{'═'*72}╗{Colors.END}"
+    footer = f"{Colors.BOLD}{Colors.GREEN}╚{'═'*72}╝{Colors.END}"
+    
+    # Log header
+    logger.log(level, header)
+    
+    # Log title with centering
+    title_colored = f"{Colors.BOLD}{Colors.GREEN}{title}{Colors.END}"
+    logger.log(level, f"{Colors.BOLD}{Colors.GREEN}║{Colors.END} {title_colored}")
+    logger.log(level, f"{Colors.BOLD}{Colors.GREEN}║{Colors.END}")
+    
+    # Log lines
+    for line in lines:
+        logger.log(level, f"{Colors.BOLD}{Colors.GREEN}║{Colors.END} {line}")
+    
+    # Log footer
+    logger.log(level, footer)
+
+
+def print_section_header(title: str, logger: Optional[logging.Logger] = None, level: int = logging.INFO) -> None:
+    """Print a colored section header.
+    
+    Parameters
+    ----------
+    title : str
+        Title of the section
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    level : int, optional
+        Log level (default: logging.INFO)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    divider = f"{Colors.GREEN}{'═'*70}{Colors.END}"
+    logger.log(level, divider)
+    logger.log(level, f"{Colors.BOLD}{Colors.GREEN}{title}{Colors.END}")
+    logger.log(level, divider)
+
+
+def print_success(message: str, logger: Optional[logging.Logger] = None) -> None:
+    """Print a success message with green color.
+    
+    Parameters
+    ----------
+    message : str
+        Success message
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    logger.info(f"{Colors.GREEN}✓ {message}{Colors.END}")
+
+
+def print_error(message: str, logger: Optional[logging.Logger] = None) -> None:
+    """Print an error message with red color.
+    
+    Parameters
+    ----------
+    message : str
+        Error message
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    logger.error(f"{Colors.RED}✗ {message}{Colors.END}")
+
+
+def print_warning(message: str, logger: Optional[logging.Logger] = None) -> None:
+    """Print a warning message with yellow color.
+    
+    Parameters
+    ----------
+    message : str
+        Warning message
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    logger.warning(f"{Colors.YELLOW}⚠️  {message}{Colors.END}")
+
+
+def print_info(message: str, logger: Optional[logging.Logger] = None, indent: int = 0) -> None:
+    """Print an info message with optional indentation.
+    
+    Parameters
+    ----------
+    message : str
+        Info message
+    logger : logging.Logger, optional
+        Logger instance (if None, uses print)
+    indent : int, optional
+        Number of spaces to indent (default: 0)
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    prefix = "  " * indent
+    logger.info(f"{prefix}{message}")
 
 
 def add_common_arguments(parser, exclude_participant_label=False):
@@ -635,9 +799,6 @@ def parse_args() -> argparse.Namespace:
 
 def setup_terminal_colors() -> None:
     """Configure colored output for warnings and errors."""
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    RESET = '\033[0m'
 
     def warning_formatter(
         message: str,
@@ -647,7 +808,7 @@ def setup_terminal_colors() -> None:
         line: Optional[str] = None
     ) -> str:
         """Format warning messages with color."""
-        return f"{YELLOW}{filename}:{lineno}: {category.__name__}: {message}{RESET}\n"
+        return f"{Colors.YELLOW}{filename}:{lineno}: {category.__name__}: {message}{Colors.END}\n"
 
     def exception_handler(
         exc_type: type,
@@ -656,7 +817,7 @@ def setup_terminal_colors() -> None:
     ) -> None:
         """Format exception messages with color."""
         tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        print(f"{RED}{tb_str}{RESET}", file=sys.stderr)
+        print(f"{Colors.RED}{tb_str}{Colors.END}", file=sys.stderr)
 
     warnings.formatwarning = warning_formatter
     sys.excepthook = exception_handler

@@ -23,6 +23,7 @@ from ln2t_tools.utils.defaults import (
     MAX_PARALLEL_INSTANCES,
     LOCKFILE_DIR
 )
+from ln2t_tools.cli import Colors
 
 logger = logging.getLogger(__name__)
 
@@ -322,10 +323,10 @@ def list_missing_subjects(
 
 def check_file_exists(file_path: str):
     if not os.path.isfile(file_path):
-        print(f"File {file_path} does not exist.")
+        logger.error(f"File {file_path} does not exist.")
         return False
     else:
-        print(f"File {file_path} found.")
+        logger.info(f"✓ File {file_path} found.")
         return True
 
 
