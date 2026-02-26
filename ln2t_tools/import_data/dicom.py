@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 def discover_participants_from_dicom_dir(
     dicom_dir: Path,
-    ds_initials: str
+    ds_initials: str,
+    only_uncompressed: bool = False
 ) -> List[str]:
     """Discover participant labels from DICOM directory.
     
@@ -27,6 +28,10 @@ def discover_participants_from_dicom_dir(
         Path to dicom directory (e.g., sourcedata/dicom)
     ds_initials : str
         Dataset initials prefix (e.g., 'CB', 'HP')
+    only_uncompressed : bool
+        If True, only consider uncompressed folders (e.g., AB001) and skip
+        .tar.gz archives. If False, consider both folders and archives.
+        Default: False
         
     Returns
     -------
@@ -36,13 +41,18 @@ def discover_participants_from_dicom_dir(
     participants = set()
     
     # Pattern: {ds_initials}* (e.g., CB001, CB002, HP042SES1)
-    # Look for both directories and .tar.gz archives
+    # Look for both directories and .tar.gz archives (or only directories if only_uncompressed=True)
     
     for item in dicom_dir.iterdir():
         name = item.name
+        is_archive = name.endswith('.tar.gz')
+        
+        # Skip archives if only_uncompressed is True
+        if is_archive and only_uncompressed:
+            continue
         
         # Remove .tar.gz extension if present
-        if name.endswith('.tar.gz'):
+        if is_archive:
             name = name[:-7]  # Remove '.tar.gz'
         
         # Check if it starts with the dataset initials
@@ -180,7 +190,8 @@ def create_verified_archive(source_path: Path, archive_path: Path) -> bool:
 
 def extract_archive_if_needed(
     dicom_dir: Path,
-    source_name: str
+    source_name: str,
+    only_uncompressed: bool = False
 ) -> Tuple[Optional[Path], bool]:
     """Extract archive if directory doesn't exist but archive does.
     
@@ -190,6 +201,10 @@ def extract_archive_if_needed(
         Path to dicom directory
     source_name : str
         Name of the source directory (e.g., 'CB042')
+    only_uncompressed : bool
+        If True, only accept uncompressed folders and skip archives.
+        If False, extract from archive if folder doesn't exist.
+        Default: False
         
     Returns
     -------
@@ -202,6 +217,11 @@ def extract_archive_if_needed(
     # If directory exists, use it directly
     if source_path.exists():
         return source_path, False
+    
+    # If only_uncompressed is True, don't use archives
+    if only_uncompressed:
+        logger.debug(f"--only-uncompressed is set, skipping archive check for {source_name}")
+        return None, False
     
     # If archive exists, extract it
     if archive_path.exists():
@@ -236,7 +256,8 @@ def import_dicom(
     deface: bool = False,
     venv_path: Optional[Path] = None,
     keep_tmp_files: bool = False,
-    overwrite: bool = False
+    overwrite: bool = False,
+    only_uncompressed: bool = False
 ) -> bool:
     """Import DICOM data to BIDS format using dcm2bids.
     
@@ -266,6 +287,10 @@ def import_dicom(
         Keep temporary files created by dcm2bids (tmp_dcm2bids directory)
     overwrite : bool
         If True, overwrite existing participant data. If False, skip existing participants.
+    only_uncompressed : bool
+        If True, only check for uncompressed folders (e.g., AB001) and disregard
+        compressed archives (e.g., AB001.tar.gz). If False, check both folders and archives.
+        Default: False
         
     Returns
     -------
@@ -316,7 +341,7 @@ def import_dicom(
     # Discover participants if not provided
     if participant_labels is None or len(participant_labels) == 0:
         logger.info("No participant labels provided, discovering from dicom directory...")
-        participant_labels = discover_participants_from_dicom_dir(dicom_dir, ds_initials)
+        participant_labels = discover_participants_from_dicom_dir(dicom_dir, ds_initials, only_uncompressed=only_uncompressed)
         
         if not participant_labels:
             logger.error(f"No participants found in {dicom_dir} matching pattern {ds_initials}*")
@@ -374,10 +399,13 @@ def import_dicom(
             source_name = f"{ds_initials}{participant_id}"
         
         # Try to get source path (extract from archive if needed)
-        source_path, was_extracted = extract_archive_if_needed(dicom_dir, source_name)
+        source_path, was_extracted = extract_archive_if_needed(dicom_dir, source_name, only_uncompressed=only_uncompressed)
         
         if source_path is None:
-            logger.error(f"Source DICOM not found: {source_name} (checked directory and .tar.gz archive)")
+            if only_uncompressed:
+                logger.error(f"Source DICOM not found: {source_name} (checked directory only, --only-uncompressed is active)")
+            else:
+                logger.error(f"Source DICOM not found: {source_name} (checked directory and .tar.gz archive)")
             logger.error(f"Expected naming convention: {ds_initials}{participant_id}" + 
                        (f"SES{session}" if session else ""))
             failed_participants.append(participant_id)

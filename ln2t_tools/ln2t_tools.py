@@ -482,7 +482,8 @@ def handle_import(args):
                 deface=getattr(args, 'deface', False),
                 venv_path=venv_path,
                 keep_tmp_files=getattr(args, 'keep_tmp_files', False),
-                overwrite=overwrite
+                overwrite=overwrite,
+                only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
         
         elif datatype == 'mrs':

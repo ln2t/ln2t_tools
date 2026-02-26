@@ -3,6 +3,7 @@ import warnings
 import traceback
 import sys
 import logging
+import textwrap
 from pathlib import Path
 from typing import Optional
 from types import TracebackType  # Add this import
@@ -19,6 +20,36 @@ from ln2t_tools.tools import get_all_tools, auto_discover_tools
 # Custom logging levels
 MINIMAL = 25  # Between INFO (20) and WARNING (30)
 logging.addLevelName(MINIMAL, "MINIMAL")
+
+
+class Colors:
+    """ANSI color codes for terminal output."""
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+
+
+class ColoredHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Custom formatter with colored section headers."""
+
+    def __init__(self, prog, indent_increment=2, max_help_position=40, width=100):
+        super().__init__(prog, indent_increment, max_help_position, width)
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        if prefix is None:
+            prefix = f'{Colors.BOLD}Usage:{Colors.END} '
+        return super()._format_usage(usage, actions, groups, prefix)
+
+    def start_section(self, heading):
+        if heading:
+            heading = f'{Colors.BOLD}{Colors.CYAN}{heading}{Colors.END}'
+        super().start_section(heading)
 
 
 def configure_logging(verbosity: str) -> None:
@@ -97,57 +128,55 @@ def add_common_arguments(parser, exclude_participant_label=False):
         exclude_participant_label: If True, skip adding --participant-label argument
                                    (for dataset-wide tools like bids_validator)
     """
-    parser.add_argument(
+    required = parser.add_argument_group(
+        f'{Colors.BOLD}Required Arguments{Colors.END}'
+    )
+    
+    required.add_argument(
         "--dataset",
         help="BIDS dataset name (without -rawdata suffix)"
     )
     
+    general = parser.add_argument_group(
+        f'{Colors.BOLD}General Options{Colors.END}'
+    )
+    
     if not exclude_participant_label:
-        parser.add_argument(
+        general.add_argument(
             "--participant-label",
             nargs='+',
             help="One or more participant labels (without 'sub-' prefix)"
         )
     
-    parser.add_argument(
+    general.add_argument(
         "--output-label",
         help="Custom label for output directory"
     )
     
-    parser.add_argument(
-        "--fs-license",
-        type=Path,
-        default=DEFAULT_FS_LICENSE,
-        help="Path to FreeSurfer license file"
-    )
-    
-    parser.add_argument(
-        "--apptainer-dir",
-        type=Path,
-        default=DEFAULT_APPTAINER_DIR,
-        help="Path to Apptainer images directory"
-    )
-    
-    parser.add_argument(
+    general.add_argument(
         "--version",
         help="Tool version to use"
     )
     
-    parser.add_argument(
-        "--fs-version",
-        default=None,
-        help="FreeSurfer version to use for input data (when tool depends on FreeSurfer). "
-             "Default: auto-detect latest"
+    general.add_argument(
+        "--list-missing",
+        action="store_true",
+        help="List participants in rawdata that are missing from tool derivatives. "
+             "Shows which subjects need processing and provides a pre-typed command to run them."
     )
     
-    parser.add_argument(
+    processing = parser.add_argument_group(
+        f'{Colors.BOLD}Processing Options{Colors.END}'
+    )
+    
+    processing.add_argument(
         "--max-instances",
         type=int,
         default=MAX_PARALLEL_INSTANCES,
         help=f"Maximum number of parallel instances (default: {MAX_PARALLEL_INSTANCES})"
     )
     
-    parser.add_argument(
+    processing.add_argument(
         "--tool-args",
         type=str,
         default="",
@@ -158,86 +187,123 @@ def add_common_arguments(parser, exclude_participant_label=False):
              "Refer to each tool's documentation for available options."
     )
     
-    parser.add_argument(
-        "--list-missing",
-        action="store_true",
-        help="List participants in rawdata that are missing from tool derivatives. "
-             "Shows which subjects need processing and provides a pre-typed command to run them."
+    paths = parser.add_argument_group(
+        f'{Colors.BOLD}Path Options{Colors.END}'
+    )
+    
+    paths.add_argument(
+        "--fs-license",
+        type=Path,
+        default=DEFAULT_FS_LICENSE,
+        help="Path to FreeSurfer license file"
+    )
+    
+    paths.add_argument(
+        "--apptainer-dir",
+        type=Path,
+        default=DEFAULT_APPTAINER_DIR,
+        help="Path to Apptainer images directory"
+    )
+    
+    paths.add_argument(
+        "--fs-version",
+        default=None,
+        help="FreeSurfer version to use for input data (when tool depends on FreeSurfer). "
+             "Default: auto-detect latest"
     )
 
 
 def add_hpc_arguments(parser):
     """Add HPC cluster submission arguments."""
-    parser.add_argument(
+    hpc_submit = parser.add_argument_group(
+        f'{Colors.BOLD}HPC Submission Options{Colors.END}'
+    )
+    
+    hpc_submit.add_argument(
         "--hpc",
         action="store_true",
         help="Submit job to HPC cluster instead of running locally"
     )
-    parser.add_argument(
+    
+    hpc_auth = parser.add_argument_group(
+        f'{Colors.BOLD}HPC Authentication{Colors.END}'
+    )
+    
+    hpc_auth.add_argument(
         "--hpc-username",
         type=str,
         help="Username for HPC cluster (required if --hpc is used)"
     )
-    parser.add_argument(
+    hpc_auth.add_argument(
         "--hpc-hostname",
         type=str,
         help="HPC cluster hostname (required if --hpc is used)"
     )
-    parser.add_argument(
+    hpc_auth.add_argument(
         "--hpc-keyfile",
         type=str,
         default="~/.ssh/id_rsa",
         help="Path to SSH private key file (default: ~/.ssh/id_rsa)"
     )
-    parser.add_argument(
+    hpc_auth.add_argument(
         "--hpc-gateway",
         type=str,
         help="ProxyJump gateway hostname (optional, e.g., gwceci.ulb.ac.be)"
     )
-    parser.add_argument(
+    
+    hpc_paths = parser.add_argument_group(
+        f'{Colors.BOLD}HPC Paths{Colors.END}'
+    )
+    
+    hpc_paths.add_argument(
         "--hpc-rawdata",
         type=str,
         help="Path to rawdata on HPC (default: $GLOBALSCRATCH/rawdata on cluster)"
     )
-    parser.add_argument(
+    hpc_paths.add_argument(
         "--hpc-derivatives",
         type=str,
         help="Path to derivatives on HPC (default: $GLOBALSCRATCH/derivatives on cluster)"
     )
-    parser.add_argument(
+    hpc_paths.add_argument(
         "--hpc-apptainer-dir",
         type=str,
         help="Path to apptainer images directory on HPC (default: $GLOBALSCRATCH/apptainer on cluster)"
     )
-    parser.add_argument(
+    hpc_paths.add_argument(
         "--hpc-fs-license",
         type=str,
         help="Path to FreeSurfer license on HPC (default: $HOME/licenses/license.txt on cluster)"
     )
-    parser.add_argument(
+    
+    hpc_resources = parser.add_argument_group(
+        f'{Colors.BOLD}HPC Resources{Colors.END}'
+    )
+    
+    hpc_resources.add_argument(
         "--hpc-partition",
         type=str,
         help="HPC partition to use (default: None - let cluster decide)"
     )
-    parser.add_argument(
+    hpc_resources.add_argument(
         "--hpc-time",
         type=str,
         default="24:00:00",
         help="HPC job time limit (default: 24:00:00)"
     )
-    parser.add_argument(
+    hpc_resources.add_argument(
         "--hpc-mem",
         type=str,
         default="32G",
         help="HPC memory allocation (default: 32G)"
     )
-    parser.add_argument(
+    hpc_resources.add_argument(
         "--hpc-cpus",
         type=int,
         default=8,
         help="Number of CPUs to request (default: 8)"
     )
-    parser.add_argument(
+    hpc_resources.add_argument(
         "--hpc-gpus",
         type=int,
         default=1,
@@ -258,31 +324,155 @@ def parse_args() -> argparse.Namespace:
     # Auto-discover tools from the tools/ directory
     auto_discover_tools()
     
+    description = textwrap.dedent(f"""
+    {Colors.BOLD}{Colors.GREEN}╔══════════════════════════════════════════════════════════════════════════════╗
+    ║                     LN2T TOOLS v0.1.0                                   ║
+    ║               Neuroimaging Pipeline Runner                               ║
+    ║          Brain imaging data processing and analysis platform             ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
+
+    {Colors.BOLD}Description:{Colors.END}
+      Unified command-line interface for running neuroimaging analysis pipelines
+      on BIDS-formatted datasets. Supports multiple tools including FreeSurfer,
+      fMRIPrep, QSIPrep, and more.
+
+    {Colors.BOLD}Workflow:{Colors.END}
+      1. Import source data to BIDS format
+      2. Run analysis tools on BIDS dataset
+      3. Monitor processing progress
+      4. Manage HPC cluster submissions (optional)
+    """)
+
+    epilog = textwrap.dedent(f"""
+    {Colors.BOLD}{Colors.GREEN}═══════════════════════════════════════════════════════════════════════════════{Colors.END}
+    {Colors.BOLD}EXAMPLES{Colors.END}
+    {Colors.GREEN}═══════════════════════════════════════════════════════════════════════════════{Colors.END}
+
+    {Colors.BOLD}Listing and Exploring:{Colors.END}
+
+      {Colors.YELLOW}# List available BIDS datasets{Colors.END}
+      ln2t_tools --list-datasets
+
+      {Colors.YELLOW}# Show available tools for a specific dataset{Colors.END}
+      ln2t_tools freesurfer --help
+
+    {Colors.BOLD}Importing Data:{Colors.END}
+
+      {Colors.YELLOW}# Import all source data (DICOM, physio, MRS) to BIDS{Colors.END}
+      ln2t_tools import --dataset MyStudy --datatype all
+
+      {Colors.YELLOW}# Import only DICOM data{Colors.END}
+      ln2t_tools import --dataset MyStudy --datatype dicom
+
+      {Colors.YELLOW}# Deface anatomical images after import{Colors.END}
+      ln2t_tools import --dataset MyStudy --deface
+
+    {Colors.BOLD}Running Analysis Tools:{Colors.END}
+
+      {Colors.YELLOW}# Run FreeSurfer on all participants{Colors.END}
+      ln2t_tools freesurfer --dataset MyStudy
+
+      {Colors.YELLOW}# Run FreeSurfer on specific participants{Colors.END}
+      ln2t_tools freesurfer --dataset MyStudy --participant-label 01 02 03
+
+      {Colors.YELLOW}# Enable verbose logging{Colors.END}
+      ln2t_tools freesurfer --dataset MyStudy --verbosity debug
+
+      {Colors.YELLOW}# Pass additional arguments to tool{Colors.END}
+      ln2t_tools freesurfer --dataset MyStudy --tool-args "--openmp 4"
+
+    {Colors.BOLD}HPC Cluster Submission:{Colors.END}
+
+      {Colors.YELLOW}# Submit job to HPC cluster{Colors.END}
+      ln2t_tools freesurfer --dataset MyStudy --hpc --hpc-username myuser \\
+          --hpc-hostname login.cluster.edu
+
+      {Colors.YELLOW}# Check HPC job status{Colors.END}
+      ln2t_tools --hpc-status recent --dataset MyStudy
+
+    {Colors.BOLD}Managing Instances:{Colors.END}
+
+      {Colors.YELLOW}# List currently running instances{Colors.END}
+      ln2t_tools --list-instances
+
+      {Colors.YELLOW}# Find missing subjects that need processing{Colors.END}
+      ln2t_tools --dataset MyStudy freesurfer --list-missing
+
+    {Colors.BOLD}{Colors.GREEN}═══════════════════════════════════════════════════════════════════════════════{Colors.END}
+    {Colors.BOLD}AVAILABLE TOOLS{Colors.END}
+    {Colors.GREEN}═══════════════════════════════════════════════════════════════════════════════{Colors.END}
+
+      Use 'ln2t_tools <tool> --help' to see options for a specific tool.
+
+    {Colors.BOLD}MORE INFORMATION{Colors.END}
+    {Colors.GREEN}═══════════════════════════════════════════════════════════════════════════════{Colors.END}
+
+      Documentation:  https://github.com/ln2t/ln2t_tools
+      Report Issues:  https://github.com/ln2t/ln2t_tools/issues
+      Version:        0.1.0
+    """)
+    
     parser = argparse.ArgumentParser(
-        description="LN2T Tools - Neuroimaging Pipeline Runner",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="ln2t_tools",
+        description=description,
+        epilog=epilog,
+        formatter_class=ColoredHelpFormatter,
+        add_help=False,
     )
 
     # Global options (without subcommands)
-    parser.add_argument(
+    general = parser.add_argument_group(
+        f'{Colors.BOLD}General Options{Colors.END}'
+    )
+
+    general.add_argument(
+        "-h", "--help",
+        action="help",
+        default=argparse.SUPPRESS,
+        help="Show this help message and exit.",
+    )
+
+    general.add_argument(
+        "--version",
+        action="version",
+        version="ln2t_tools 0.1.0",
+        help="Show program version and exit.",
+    )
+
+    general.add_argument(
+        "--verbosity",
+        choices=["silent", "minimal", "verbose", "debug"],
+        default="verbose",
+        help="Logging verbosity level: silent (errors only), minimal (essential info), verbose (detailed steps, default), debug (everything)"
+    )
+
+    dataset_ops = parser.add_argument_group(
+        f'{Colors.BOLD}Dataset Operations{Colors.END}'
+    )
+
+    dataset_ops.add_argument(
         "--list-datasets",
         action="store_true",
         help="List available BIDS datasets"
     )
 
-    parser.add_argument(
+    dataset_ops.add_argument(
         "--list-missing",
         action="store_true",
         help="List subjects missing from output (requires --dataset and tool)"
     )
 
-    parser.add_argument(
+    dataset_ops.add_argument(
         "--list-instances",
         action="store_true",
         help="Show currently running instances"
     )
 
-    parser.add_argument(
+    hpc_ops = parser.add_argument_group(
+        f'{Colors.BOLD}HPC Cluster Operations{Colors.END}'
+    )
+
+    hpc_ops.add_argument(
         "--hpc-status",
         nargs='?',
         const='recent',
@@ -291,13 +481,6 @@ def parse_args() -> argparse.Namespace:
              "Combine with --dataset or --tool to filter by dataset/tool. "
              "Usage: --hpc-status (recent), --hpc-status 12345 (specific), "
              "--hpc-status --dataset D (all for dataset)"
-    )
-
-    parser.add_argument(
-        "--verbosity",
-        choices=["silent", "minimal", "verbose", "debug"],
-        default="verbose",
-        help="Logging verbosity level: silent (errors only), minimal (essential info), verbose (detailed steps, default), debug (everything)"
     )
 
     # Create subparsers for each tool
@@ -312,7 +495,7 @@ def parse_args() -> argparse.Namespace:
             tool_name,
             help=tool_class.help_text if hasattr(tool_class, 'help_text') else tool_class.description,
             description=tool_class.description,
-            formatter_class=argparse.RawDescriptionHelpFormatter
+            formatter_class=ColoredHelpFormatter
         )
         # Add common arguments (dataset, participant, version, etc.)
         # For dataset-wide tools, exclude --participant-label
@@ -328,18 +511,21 @@ def parse_args() -> argparse.Namespace:
     parser_import = subparsers.add_parser(
         'import',
         help='Import source data to BIDS format (ADMIN ONLY)',
-        description="""
-Import source data to BIDS format.
+        description=f"""
+{Colors.BOLD}{Colors.GREEN}╔══════════════════════════════════════════════════════════════════════════════╗
+║                    IMPORT SOURCE DATA TO BIDS                          ║
+╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
 
-⚠️  WARNING: ADMIN ONLY
-This tool is intended for administrators only. It requires:
-  - READ access to sourcedata directory
-  - WRITE access to rawdata directory
+{Colors.BOLD}Important:{Colors.END}
+  ⚠️  {Colors.BOLD}ADMIN ONLY{Colors.END}
+  This tool is intended for administrators only. It requires:
+    • READ access to sourcedata directory
+    • WRITE access to rawdata directory
   
-Standard users should not use this tool. Imported data will be provided
-by administrators in the rawdata directory.
+  Standard users should not use this tool.
+
 """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=ColoredHelpFormatter
     )
     add_common_arguments(parser_import)
     parser_import.add_argument(
@@ -387,6 +573,12 @@ by administrators in the rawdata directory.
         "--keep-tmp-files",
         action="store_true",
         help="Keep temporary files created by dcm2bids (tmp_dcm2bids directory in rawdata)"
+    )
+    parser_import.add_argument(
+        "--only-uncompressed",
+        action="store_true",
+        help="Only check for uncompressed source data folders (e.g., AB001) and disregard compressed archives (e.g., AB001.tar.gz). "
+             "Useful for avoiding data duplication issues when both uncompressed and compressed versions exist."
     )
     # Pre-import options (for MRS and physio data)
     parser_import.add_argument(

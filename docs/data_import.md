@@ -17,7 +17,67 @@ Convert DICOM files to BIDS-compliant NIfTI format with optional defacing:
 ln2t_tools import --dataset mydataset --participant-label 01 --datatype dicom
 ```
 
-## MRS Import
+### Automatic Participant Discovery
+
+If you don't specify `--participant-label`, the tool will automatically discover all available participants from your DICOM source directory by scanning for folders matching your dataset initials pattern:
+
+```bash
+# Discovers all participants matching {dataset_initials}* (e.g., CB001, CB042, HP007)
+ln2t_tools import --dataset mydataset --datatype dicom
+```
+
+### Handling Compressed Archives
+
+By default, the import tool handles both uncompressed folders and compressed tarball archives:
+
+**Standard behavior (both folders and archives)**:
+```bash
+# Will process both: CB001/ (folder) and CB002.tar.gz (archive)
+ln2t_tools import --dataset mydataset --datatype dicom
+```
+
+**With `--only-uncompressed` option**:
+```bash
+# Only processes uncompressed folders: CB001/ 
+# Ignores any compressed archives like CB002.tar.gz
+ln2t_tools import --dataset mydataset --datatype dicom --only-uncompressed
+```
+
+#### When to Use `--only-uncompressed`
+
+Use this option when:
+- You have both uncompressed folders AND compressed archives for the same data
+- You want to avoid processing the compressed version (to prevent duplication)
+- You're intentionally working with only the extracted, uncompressed source data
+- You want to ensure the tool doesn't extract large archives unnecessarily
+
+#### Data Source Detection Logic
+
+| Scenario | Default Behavior | With `--only-uncompressed` |
+|----------|-----------------|-------------------------|
+| Only `CB001/` folder exists | ✓ Process | ✓ Process |
+| Only `CB001.tar.gz` archive exists | ✓ Extract & process | ✗ Skip (not found error) |
+| Both `CB001/` and `CB001.tar.gz` exist | ✓ Use existing folder | ✓ Use existing folder |
+| Neither exists | ✗ Not found error | ✗ Not found error |
+
+### Additional DICOM Import Options
+
+```bash
+# Deface anatomical images during import
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype dicom --deface
+
+# Keep temporary dcm2bids files (normally deleted)
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype dicom --keep-tmp-files
+
+# Specify custom virtual environment for dcm2bids
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype dicom \
+  --import-env /path/to/venv
+
+# Multi-session import
+ln2t_tools import --dataset mydataset --participant-label 01 --datatype dicom --session 01
+```
+
+
 
 Convert Magnetic Resonance Spectroscopy data to BIDS format:
 
