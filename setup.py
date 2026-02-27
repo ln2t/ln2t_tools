@@ -2,6 +2,7 @@ from setuptools import setup, find_packages
 from setuptools.command.develop import develop
 from setuptools.command.install import install
 import os
+import sys
 
 # Function to read the contents of the requirements file
 def read_requirements():
@@ -12,17 +13,25 @@ class PostDevelopCommand(develop):
     """Post-installation for development mode."""
     def run(self):
         develop.run(self)
-        # Import and run the install script
-        from ln2t_tools.install.post_install import install_completion
-        install_completion()
+        # Import and run the install script - gracefully handle import errors during build
+        try:
+            from ln2t_tools.install.post_install import install_completion
+            install_completion()
+        except (ImportError, ModuleNotFoundError) as e:
+            print(f"Warning: Could not run post-install hook: {e}", file=sys.stderr)
+            print("The package will still be installed successfully.", file=sys.stderr)
 
 class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
-        # Import and run the install script
-        from ln2t_tools.install.post_install import install_completion
-        install_completion()
+        # Import and run the install script - gracefully handle import errors during build
+        try:
+            from ln2t_tools.install.post_install import install_completion
+            install_completion()
+        except (ImportError, ModuleNotFoundError) as e:
+            print(f"Warning: Could not run post-install hook: {e}", file=sys.stderr)
+            print("The package will still be installed successfully.", file=sys.stderr)
 
 setup(
     name="ln2t_tools",
@@ -32,6 +41,7 @@ setup(
     author_email='antonin.rovai@hubruxelles.be',
     description='Tools to manage, preprocess and process data at the LN2T',
     packages=find_packages(),
+    python_requires=">=3.8",
     install_requires=read_requirements(),
     entry_points={
         'console_scripts': [
