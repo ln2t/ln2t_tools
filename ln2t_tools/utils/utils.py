@@ -589,11 +589,13 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         workdir = os.environ.get('HOME', '/tmp')
         
         cmd = (
-            f"apptainer run --cleanenv --containall "
+            f"apptainer run --cleanenv --containall --writable-tmpfs "
             f"-B {options['fs_license']}:/opt/freesurfer/license.txt "
             f"-B {options['rawdata']}:/data:ro "
             f"-B {options['derivatives']}:/out "
             f"-B {workdir}:/tmp/work "
+            f"-B {options['derivatives']}:/tmp:rw "
+            f"--env TMPDIR=/tmp "
             f"{options['apptainer_img']} " 
             f"/data /out participant "
             f"--participant-label {options['participant_label']} "
@@ -645,6 +647,8 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         
         cmd = (
             f"apptainer run --containall --writable-tmpfs "
+            f"-B {options['derivatives']}:/tmp:rw "
+            f"--env TMPDIR=/tmp "
             + " ".join(bindings) + " "
             f"{options['apptainer_img']} "
             f"/data /out participant "

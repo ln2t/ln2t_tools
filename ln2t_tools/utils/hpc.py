@@ -1357,7 +1357,9 @@ apptainer run \\
     -B "$HPC_RAWDATA/$DATASET-rawdata:/data:ro" \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/tmp/work" \\
-    --cleanenv --containall \\
+    -B "$OUTPUT_DIR:/tmp:rw" \\
+    --cleanenv --containall --writable-tmpfs \\
+    --env TMPDIR=/tmp \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
@@ -1393,6 +1395,8 @@ apptainer run --containall --writable-tmpfs \\
     -B "$OUTPUT_DIR:/out" \\
     -B "$WORK_DIR:/work" \\
     -B "$CODE_DIR:/code:ro" \\
+    -B "$OUTPUT_DIR:/tmp:rw" \\
+    --env TMPDIR=/tmp \\
     {apptainer_img} \\
     /data /out participant \\
     --participant-label {participant_label} \\
