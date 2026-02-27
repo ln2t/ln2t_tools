@@ -458,7 +458,12 @@ def import_dicom(
                 # If we extracted from archive, still clean up
                 if was_extracted and source_path.exists():
                     logger.info(f"Cleaning up extracted directory after failed conversion: {source_path.name}")
-                    shutil.rmtree(source_path)
+                    try:
+                        shutil.rmtree(source_path)
+                        logger.info(f"✓ Cleaned up extracted directory: {source_path.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to clean up {source_path.name}: {e}")
+                        logger.error(f"Please manually delete: {source_path}")
                 continue
             
             logger.info(f"✓ Successfully imported {participant_id}")
@@ -474,8 +479,12 @@ def import_dicom(
                     if create_verified_archive(source_path, compressed_file):
                         # Archive verified successfully, safe to delete original
                         logger.info(f"Deleting original directory after successful compression: {source_path.name}")
-                        shutil.rmtree(source_path)
-                        logger.info(f"✓ Deleted {source_path.name}")
+                        try:
+                            shutil.rmtree(source_path)
+                            logger.info(f"✓ Deleted {source_path.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to delete {source_path.name}: {e}")
+                            logger.error(f"Please manually delete: {source_path}")
                     else:
                         logger.warning(f"Archive creation/verification failed, keeping original directory: {source_path.name}")
                 else:
@@ -484,7 +493,12 @@ def import_dicom(
             # If we extracted from archive and conversion succeeded, clean up extracted directory
             if was_extracted:
                 logger.info(f"Cleaning up extracted directory: {source_path.name}")
-                shutil.rmtree(source_path)
+                try:
+                    shutil.rmtree(source_path)
+                    logger.info(f"✓ Cleaned up extracted directory: {source_path.name}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up extracted directory {source_path.name}: {e}")
+                    logger.error(f"Please manually delete: {source_path}")
             
         except subprocess.CalledProcessError as e:
             logger.error(f"✗ Failed to import {participant_id}: {e.stderr}")
@@ -493,14 +507,24 @@ def import_dicom(
             # If we extracted from archive and conversion failed, still clean up
             if was_extracted and source_path.exists():
                 logger.info(f"Cleaning up extracted directory after failed conversion: {source_path.name}")
-                shutil.rmtree(source_path)
+                try:
+                    shutil.rmtree(source_path)
+                    logger.info(f"✓ Cleaned up extracted directory: {source_path.name}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up {source_path.name}: {e}")
+                    logger.error(f"Please manually delete: {source_path}")
             continue
     
     # Cleanup tmp_dcm2bids directory (unless --keep-tmp-files is set)
     tmp_dir = rawdata_dir / "tmp_dcm2bids"
     if tmp_dir.exists() and not keep_tmp_files:
         logger.info("Cleaning up tmp_dcm2bids directory...")
-        shutil.rmtree(tmp_dir)
+        try:
+            shutil.rmtree(tmp_dir)
+            logger.info("✓ Cleaned up tmp_dcm2bids directory")
+        except Exception as e:
+            logger.error(f"Failed to clean up tmp_dcm2bids directory: {e}")
+            logger.error(f"Please manually delete: {tmp_dir}")
     elif tmp_dir.exists() and keep_tmp_files:
         logger.info(f"Keeping tmp_dcm2bids directory: {tmp_dir}")
     
