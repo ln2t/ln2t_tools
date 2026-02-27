@@ -811,11 +811,11 @@ def import_mrs(
             participant_id = participant.replace('sub-', '')
             # Check if MRS data already exists for this participant
             if session:
-                mrs_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "mrs"
+                existing_mrs_dir = rawdata_dir / f"sub-{participant_id}" / f"ses-{session}" / "mrs"
             else:
-                mrs_dir = rawdata_dir / f"sub-{participant_id}" / "mrs"
+                existing_mrs_dir = rawdata_dir / f"sub-{participant_id}" / "mrs"
             
-            if mrs_dir.exists():
+            if existing_mrs_dir.exists():
                 logger.info(f"Participant {participant_id} already has MRS data, skipping (use --overwrite to re-process)")
             else:
                 new_participants.append(participant)
