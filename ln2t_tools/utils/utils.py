@@ -23,7 +23,6 @@ from ln2t_tools.utils.defaults import (
     MAX_PARALLEL_INSTANCES,
     LOCKFILE_DIR
 )
-from ln2t_tools.cli import Colors
 
 logger = logging.getLogger(__name__)
 
