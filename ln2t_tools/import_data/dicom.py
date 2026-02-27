@@ -371,7 +371,7 @@ def import_dicom(
     
     # Setup virtual environment
     if venv_path is None:
-        venv_path = Path.home() / "venvs" / "general_purpose_env"
+        venv_path = Path("/opt/ln2t/venv/ln2t_tools")
     
     activate_script = venv_path / "bin" / "activate"
     if not activate_script.exists():

@@ -838,7 +838,7 @@ def import_mrs(
     else:
         # Priority 2: Setup virtual environment
         if venv_path is None:
-            venv_path = Path.home() / "venvs" / "general_purpose_env"
+            venv_path = Path("/opt/ln2t/venv/ln2t_tools")
         
         activate_script = venv_path / "bin" / "activate"
         if not activate_script.exists():
@@ -863,7 +863,7 @@ def import_mrs(
             logger.error(
                 "spec2bids not found. Please install it:\n"
                 "  1. Build at /opt/ln2t/spec2bids/venv/spec2bids (priority)\n"
-                "  2. Install in virtual environment at ~/venvs/general_purpose_env\n"
+                "  2. Install in /opt/ln2t/venv/ln2t_tools\n"
                 "  3. Clone from https://github.com/arovai/spec2bids or install via pip"
             )
             return False

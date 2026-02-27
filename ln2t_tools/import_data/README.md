@@ -211,7 +211,7 @@ ln2t_tools import \
 - `--compress-source`: Create .tar.gz archives of source data after successful import (default: False)
 - `--deface`: Run pydeface on anatomical images (default: False)
 - `--phys2bids`: Use phys2bids instead of in-house physio processing (default: False)
-- `--import-env`: Path to Python virtual environment with import tools (default: ~/venvs/general_purpose_env)
+- `--import-env`: Path to Python virtual environment with import tools (default: /opt/ln2t/venv/ln2t_tools)
 - `--physio-config`: Path to physiological data configuration file (default: auto-detect)
 
 ## Configuration Files
@@ -505,12 +505,14 @@ The import subcommand will automatically activate the virtual environment before
 
 ### Setup Virtual Environment
 
-```bash
-# Create virtual environment
-python3 -m venv ~/venvs/general_purpose_env
-source ~/venvs/general_purpose_env/bin/activate
+All necessary import tools (dcm2bids, spec2bids, etc.) are either:
+- System-wide available, or
+- Pre-installed in the ln2t_tools venv at `/opt/ln2t/venv/ln2t_tools`
 
-# Install tools
+No additional virtual environment setup is required. If needed, reusable tools can be installed in the ln2t_tools venv:
+
+```bash
+source /opt/ln2t/venv/ln2t_tools/bin/activate
 pip install dcm2bids
 
 # Install spec2bids (if available)

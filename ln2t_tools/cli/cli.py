@@ -720,7 +720,7 @@ def parse_args() -> argparse.Namespace:
     parser_import.add_argument(
         "--import-env",
         type=Path,
-        help="Path to Python virtual environment for import tools (default: ~/venvs/general_purpose_env)"
+        help="Path to Python virtual environment for import tools (default: /opt/ln2t/venv/ln2t_tools)"
     )
     parser_import.add_argument(
         "--phys2bids",
