@@ -38,11 +38,20 @@ def install_completion():
                     with open(bashrc, 'a') as f:
                         f.write(source_line)
         
-        logger.info(f"Installed completion script to {completion_dest}")
+        print(f"✓ Installed completion script to {completion_dest}")
+        print(f"✓ Added sourcing to {bashrc}")
+        print("\nTo enable bash completion immediately, run:")
+        print("  source ~/.bashrc")
         
     except Exception as e:
-        logger.warning(f"Failed to install completion script: {e}")
+        print(f"Warning: Failed to install completion script: {e}", flush=True)
+        print(f"You can manually install it by running:", flush=True)
+        print(f"  python -m ln2t_tools.install.post_install", flush=True)
         # Don't raise the exception - allow installation to continue
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    install_completion()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
