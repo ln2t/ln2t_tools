@@ -49,8 +49,15 @@ pip install -U pip && pip install -U .
 ```
 
 4. (Optional) Enable bash completion:
+
+Bash completion should be installed automatically during installation. If it's not set up, run:
 ```bash
-echo "source ~/.local/share/bash-completion/completions/ln2t_tools" >> ~/.bashrc
+python -m ln2t_tools.install.post_install
+source ~/.bashrc
+```
+
+Then reload your shell:
+```bash
 source ~/.bashrc
 ```
 
