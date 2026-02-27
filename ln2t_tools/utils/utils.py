@@ -530,11 +530,12 @@ def build_apptainer_cmd(tool: str, **options) -> str:
             t1w_container = str(t1w_host)
         
         cmd = (
-            f"apptainer run --cleanenv --containall --writable-tmpfs=50G "
+            f"apptainer run --cleanenv --containall --writable-tmpfs "
             f"-B {options['fs_license']}:/usr/local/freesurfer/.license "
             f"-B {options['fs_license']}:/opt/freesurfer/.license "
             f"-B {options['rawdata']}:/rawdata:ro -B {options['derivatives']}:/derivatives "
-            f"--env TMPDIR=/derivatives/.tmp "
+            f"-B {options['derivatives']}:/tmp:rw "
+            f"--env TMPDIR=/tmp "
             f"{options['apptainer_img']} recon-all -all -subjid {subject_id} "
             f"-i {t1w_container} "
             f"-sd /derivatives/{options['output_label']}"
