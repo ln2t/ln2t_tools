@@ -35,7 +35,7 @@ def import_physio(
     matching_tolerance_sec: Optional[float] = None,
     overwrite: bool = False,
     only_uncompressed: bool = False
-) -> bool:
+) -> tuple[bool, List[str]]:
     """Import physiological data to BIDS format.
     
     By default uses in-house processing. Set use_phys2bids=True to use phys2bids instead.
@@ -73,8 +73,8 @@ def import_physio(
         
     Returns
     -------
-    bool
-        True if import successful, False otherwise
+    tuple[bool, List[str]]
+        Tuple of (success: True if any import successful, list of successfully processed participant IDs)
     """
     if use_phys2bids:
         logger.info("Using phys2bids for physiological data import")
@@ -167,7 +167,7 @@ def import_physio_phys2bids(
     session: Optional[str] = None,
     compress_source: bool = False,
     apptainer_dir: Path = Path("/opt/apptainer")
-) -> bool:
+) -> tuple[bool, List[str]]:
     """Import physiological data to BIDS format using phys2bids.
     
     Automatically matches GE physiological recordings (RESP, PPG) to fMRI runs
@@ -194,25 +194,25 @@ def import_physio_phys2bids(
         
     Returns
     -------
-    bool
-        True if import successful, False otherwise
+    tuple[bool, List[str]]
+        Tuple of (success: True if any import successful, list of successfully processed participant IDs)
     """
     # Get or build phys2bids container
     try:
         container_path = get_phys2bids_container(apptainer_dir)
     except Exception as e:
         logger.error(f"Failed to get phys2bids container: {e}")
-        return False
+        return (False, [])
     
     # Validate paths
     if not sourcedata_dir.exists():
         logger.error(f"Source data directory not found: {sourcedata_dir}")
-        return False
+        return (False, [])
     
     physio_dir = sourcedata_dir / "physio"
     if not physio_dir.exists():
         logger.error(f"Physio directory not found: {physio_dir}")
-        return False
+        return (False, [])
     
     logger.info(f"Found physio directory: {physio_dir}")
     
@@ -230,6 +230,7 @@ def import_physio_phys2bids(
     # Process each participant
     success_count = 0
     failed_participants = []
+    successful_participants = []  # Track participants that were successfully processed
     
     for participant in participant_labels:
         participant_id = participant.replace('sub-', '')
@@ -328,6 +329,7 @@ def import_physio_phys2bids(
         if match_success > 0:
             logger.info(f"✓ Successfully imported {match_success}/{len(matches)} physio files for {participant_id}")
             success_count += 1
+            successful_participants.append(participant_id)  # Track successful import
             
             # Compress source files if requested
             if compress_source:
@@ -344,7 +346,7 @@ def import_physio_phys2bids(
         logger.info(f"  Failed: {', '.join(failed_participants)}")
     logger.info(f"{'='*60}\n")
     
-    return success_count > 0
+    return (success_count > 0, successful_participants)
 
 
 def parse_physio_files(physio_dir: Path) -> List[Dict]:

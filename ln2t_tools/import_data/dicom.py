@@ -258,7 +258,7 @@ def import_dicom(
     keep_tmp_files: bool = False,
     overwrite: bool = False,
     only_uncompressed: bool = False
-) -> bool:
+) -> tuple[bool, List[str]]:
     """Import DICOM data to BIDS format using dcm2bids.
     
     Parameters
@@ -294,18 +294,18 @@ def import_dicom(
         
     Returns
     -------
-    bool
-        True if import successful, False otherwise
+    tuple[bool, List[str]]
+        Tuple of (success: True if any import successful, list of successfully processed participant IDs)
     """
     # Validate paths
     if not sourcedata_dir.exists():
         logger.error(f"Source data directory not found: {sourcedata_dir}")
-        return False
+        return (False, [])
     
     dicom_dir = sourcedata_dir / "dicom"
     if not dicom_dir.exists():
         logger.error(f"DICOM directory not found: {dicom_dir}")
-        return False
+        return (False, [])
     
     # Check for dcm2bids config
     config_file = sourcedata_dir / "dcm2bids" / "config.json"
@@ -318,7 +318,7 @@ def import_dicom(
                 f"  {sourcedata_dir}/dcm2bids/config.json\n"
                 f"  {sourcedata_dir}/configs/dcm2bids.json"
             )
-            return False
+            return (False, [])
     
     logger.info(f"Using dcm2bids config: {config_file}")
     
@@ -336,7 +336,7 @@ def import_dicom(
         else:
             logger.error(f"Could not infer dataset initials from '{dataset}'. "
                         f"Please provide --ds-initials explicitly.")
-            return False
+            return (False, [])
     
     # Discover participants if not provided
     if participant_labels is None or len(participant_labels) == 0:
@@ -345,7 +345,7 @@ def import_dicom(
         
         if not participant_labels:
             logger.error(f"No participants found in {dicom_dir} matching pattern {ds_initials}*")
-            return False
+            return (False, [])
     
     # Filter out existing participants unless overwrite is enabled
     if not overwrite:
@@ -386,6 +386,7 @@ def import_dicom(
     # Process each participant
     success_count = 0
     failed_participants = []
+    successful_participants = []  # Track participants that were successfully processed
     extracted_archives = []  # Track archives that were extracted (to clean up later if needed)
     
     for participant in participant_labels:
@@ -470,6 +471,7 @@ def import_dicom(
             if result.stdout:
                 logger.debug(result.stdout)
             success_count += 1
+            successful_participants.append(participant_id)  # Track successful import
             
             # Compress source data if requested (only after successful conversion)
             if compress_source and not was_extracted:
@@ -562,7 +564,7 @@ def import_dicom(
         logger.info(f"  Failed: {', '.join(failed_participants)}")
     logger.info(f"{'='*60}\n")
     
-    return success_count > 0
+    return (success_count > 0, successful_participants)
 
 
 def run_pydeface(

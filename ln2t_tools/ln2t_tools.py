@@ -499,6 +499,10 @@ def handle_import(args):
     # Check if overwrite is enabled
     overwrite = getattr(args, 'overwrite', False)
     
+    # Track successfully processed participants from DICOM import 
+    # (used for --full --only-uncompressed to maintain consistent participant list across steps)
+    dicom_processed_participants = None
+    
     for datatype in datatypes:
         logger.info(f"\n{'='*60}")
         logger.info(f"Processing {datatype.upper()} data")
@@ -513,7 +517,7 @@ def handle_import(args):
             # Compress source by default, unless --skip-source-compression is set
             compress_source = not getattr(args, 'skip_source_compression', False)
             
-            import_success['dicom'] = import_dicom(
+            import_success_status, dicom_processed_participants = import_dicom(
                 dataset=dataset,
                 participant_labels=args.participant_label,
                 sourcedata_dir=sourcedata_dir,
@@ -527,12 +531,25 @@ def handle_import(args):
                 overwrite=overwrite,
                 only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
+            import_success['dicom'] = import_success_status
         
         elif datatype == 'mrs':
             # Check if mrs or pfiles directory exists
             if not (sourcedata_dir / "mrs").exists() and not (sourcedata_dir / "pfiles").exists():
                 logger.info(f"No mrs/pfiles directory found in {sourcedata_dir}, skipping")
                 continue
+            
+            # Determine which participant list to use for this step
+            # When --full and --only-uncompressed are used, use the fixed list from DICOM import
+            # to ensure consistency across all steps
+            mrs_participant_labels = args.participant_label
+            if getattr(args, 'full', False) and getattr(args, 'only_uncompressed', False) and dicom_processed_participants is not None:
+                mrs_participant_labels = dicom_processed_participants
+                if mrs_participant_labels:
+                    logger.info(f"Using {len(mrs_participant_labels)} participants from DICOM import: {mrs_participant_labels}")
+                else:
+                    logger.info("No participants were successfully processed in DICOM import, skipping MRS")
+                    continue
             
             # If --full is enabled, run pre-import first
             if getattr(args, 'full', False):
@@ -543,7 +560,7 @@ def handle_import(args):
                 
                 pre_import_success = pre_import_mrs(
                     dataset=dataset,
-                    participant_labels=args.participant_label,
+                    participant_labels=mrs_participant_labels,
                     sourcedata_dir=sourcedata_dir,
                     ds_initials=get_dataset_initials(dataset),
                     session=getattr(args, 'session', None),
@@ -563,9 +580,9 @@ def handle_import(args):
             # Compress source by default, unless --skip-source-compression is set
             compress_source = not getattr(args, 'skip_source_compression', False)
             
-            import_success['mrs'] = import_mrs(
+            import_success_status, mrs_processed_participants = import_mrs(
                 dataset=dataset,
-                participant_labels=args.participant_label,
+                participant_labels=mrs_participant_labels,
                 sourcedata_dir=sourcedata_dir,
                 rawdata_dir=rawdata_dir,
                 ds_initials=get_dataset_initials(dataset),
@@ -575,12 +592,25 @@ def handle_import(args):
                 overwrite=overwrite,
                 only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
+            import_success['mrs'] = import_success_status
         
         elif datatype == 'physio':
             # Check if physio directory exists
             if not (sourcedata_dir / "physio").exists():
                 logger.info(f"No physio directory found in {sourcedata_dir}, skipping")
                 continue
+            
+            # Determine which participant list to use for this step
+            # When --full and --only-uncompressed are used, use the fixed list from DICOM import
+            # to ensure consistency across all steps
+            physio_participant_labels = args.participant_label
+            if getattr(args, 'full', False) and getattr(args, 'only_uncompressed', False) and dicom_processed_participants is not None:
+                physio_participant_labels = dicom_processed_participants
+                if physio_participant_labels:
+                    logger.info(f"Using {len(physio_participant_labels)} participants from DICOM import: {physio_participant_labels}")
+                else:
+                    logger.info("No participants were successfully processed in DICOM import, skipping physio")
+                    continue
             
             # If --full is enabled, run pre-import first
             if getattr(args, 'full', False):
@@ -591,7 +621,7 @@ def handle_import(args):
                 
                 pre_import_success = pre_import_physio(
                     dataset=dataset,
-                    participant_labels=args.participant_label,
+                    participant_labels=physio_participant_labels,
                     sourcedata_dir=sourcedata_dir,
                     ds_initials=get_dataset_initials(dataset),
                     session=getattr(args, 'session', None),
@@ -611,9 +641,9 @@ def handle_import(args):
             # Compress source by default, unless --skip-source-compression is set
             compress_source = not getattr(args, 'skip_source_compression', False)
             
-            import_success['physio'] = import_physio(
+            import_success_status, physio_processed_participants = import_physio(
                 dataset=dataset,
-                participant_labels=args.participant_label,
+                participant_labels=physio_participant_labels,
                 sourcedata_dir=sourcedata_dir,
                 rawdata_dir=rawdata_dir,
                 ds_initials=get_dataset_initials(dataset),
@@ -626,6 +656,7 @@ def handle_import(args):
                 overwrite=overwrite,
                 only_uncompressed=getattr(args, 'only_uncompressed', False)
             )
+            import_success['physio'] = import_success_status
         
         elif datatype == 'meg':
             # Check if meg directory exists

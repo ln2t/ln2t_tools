@@ -618,7 +618,7 @@ def import_physio_inhouse(
     session: Optional[str] = None,
     matching_tolerance_sec: Optional[float] = None,
     overwrite: bool = False
-) -> bool:
+) -> tuple[bool, List[str]]:
     """Import physiological data to BIDS format using in-house processing.
     
     Parameters
@@ -646,18 +646,18 @@ def import_physio_inhouse(
         
     Returns
     -------
-    bool
-        True if import successful, False otherwise
+    tuple[bool, List[str]]
+        Tuple of (success: True if any import successful, list of successfully processed participant IDs)
     """
     # Validate paths
     if not sourcedata_dir.exists():
         logger.error(f"Source data directory not found: {sourcedata_dir}")
-        return False
+        return (False, [])
     
     physio_dir = sourcedata_dir / "physio"
     if not physio_dir.exists():
         logger.error(f"Physio directory not found: {physio_dir}")
-        return False
+        return (False, [])
     
     logger.info(f"Found physio directory: {physio_dir}")
     
@@ -671,12 +671,12 @@ def import_physio_inhouse(
     dummy_volumes_config = config.get('DummyVolumes', {})
     if not isinstance(dummy_volumes_config, dict):
         logger.error(f"Invalid DummyVolumes config: expected dict, got {type(dummy_volumes_config)}")
-        return False
+        return (False, [])
     
     task_config = {k: v for k, v in dummy_volumes_config.items() if not k.startswith('_')}
     if not task_config:
         logger.error("DummyVolumes configuration is empty (no task definitions found)")
-        return False
+        return (False, [])
     
     logger.info(f"Loaded DummyVolumes for {len(task_config)} task(s):")
     for task_key, volumes in sorted(task_config.items()):
@@ -694,6 +694,7 @@ def import_physio_inhouse(
     # Process each participant
     success_count = 0
     failed_participants = []
+    successful_participants = []  # Track participants that were successfully processed
     
     for participant in participant_labels:
         participant_id = participant.replace('sub-', '')
@@ -800,6 +801,7 @@ def import_physio_inhouse(
         if match_success > 0:
             logger.info(f"✓ Successfully processed {match_success}/{len(matches)} physio files for {participant_id}")
             success_count += 1
+            successful_participants.append(participant_id)  # Track successful import
         else:
             logger.error(f"✗ Failed to process physio data for {participant_id}")
             failed_participants.append(participant_id)
@@ -812,4 +814,4 @@ def import_physio_inhouse(
         logger.info(f"  Failed: {', '.join(failed_participants)}")
     logger.info(f"{'='*60}\n")
     
-    return success_count > 0
+    return (success_count > 0, successful_participants)

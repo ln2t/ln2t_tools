@@ -701,7 +701,7 @@ def import_mrs(
     venv_path: Optional[Path] = None,
     overwrite: bool = False,
     only_uncompressed: bool = False
-) -> bool:
+) -> tuple[bool, List[str]]:
     """Import MRS data to BIDS format using spec2bids.
     
     Based on the spec2bids tool pattern: processes GE P-files and other
@@ -735,13 +735,13 @@ def import_mrs(
         
     Returns
     -------
-    bool
-        True if import successful, False otherwise
+    tuple[bool, List[str]]
+        Tuple of (success: True if any import successful, list of successfully processed participant IDs)
     """
     # Validate paths
     if not sourcedata_dir.exists():
         logger.error(f"Source data directory not found: {sourcedata_dir}")
-        return False
+        return (False, [])
     
     # MRS data can be in 'mrs' or 'pfiles' directory
     mrs_dir = sourcedata_dir / "mrs"
@@ -749,7 +749,7 @@ def import_mrs(
         mrs_dir = sourcedata_dir / "pfiles"
         if not mrs_dir.exists():
             logger.error(f"MRS directory not found in {sourcedata_dir} (tried 'mrs' and 'pfiles')")
-            return False
+            return (False, [])
     
     # Check for spec2bids config
     config_file = sourcedata_dir / "spec2bids" / "config.json"
@@ -761,7 +761,7 @@ def import_mrs(
                 f"  {sourcedata_dir}/spec2bids/config.json\n"
                 f"  {sourcedata_dir}/configs/spec2bids.json"
             )
-            return False
+            return (False, [])
     
     logger.info(f"Using spec2bids config: {config_file}")
     
@@ -771,13 +771,13 @@ def import_mrs(
             config = json.load(f)
         if "manufacturer" not in config:
             logger.error("spec2bids config missing 'manufacturer' field")
-            return False
+            return (False, [])
         if "descriptions" not in config:
             logger.error("spec2bids config missing 'descriptions' field")
-            return False
+            return (False, [])
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in config file: {e}")
-        return False
+        return (False, [])
     
     # If ds_initials not provided, extract from dataset name
     # Dataset format: 2024-Fantastic_Fox-123456789 -> FF
@@ -793,7 +793,7 @@ def import_mrs(
         else:
             logger.error(f"Could not infer dataset initials from '{dataset}'. "
                         f"Please provide --ds-initials explicitly.")
-            return False
+            return (False, [])
     
     # Discover participants if not provided
     if participant_labels is None or len(participant_labels) == 0:
@@ -802,7 +802,7 @@ def import_mrs(
         
         if not participant_labels:
             logger.error(f"No participants found in {mrs_dir} matching pattern {ds_initials}*")
-            return False
+            return (False, [])
     
     # Filter out existing participants unless overwrite is enabled
     if not overwrite:
@@ -822,7 +822,7 @@ def import_mrs(
         
         if not new_participants:
             logger.info("All participants already have MRS data. Skipping MRS import.")
-            return True
+            return (True, [])
         
         participant_labels = new_participants
     
@@ -866,7 +866,7 @@ def import_mrs(
                 "  2. Install in /opt/ln2t/venv/ln2t_tools\n"
                 "  3. Clone from https://github.com/arovai/spec2bids or install via pip"
             )
-            return False
+            return (False, [])
     
     # Create rawdata directory if needed
     rawdata_dir.mkdir(parents=True, exist_ok=True)
@@ -874,6 +874,7 @@ def import_mrs(
     # Process each participant
     success_count = 0
     failed_participants = []
+    successful_participants = []  # Track participants that were successfully processed
     
     for participant in participant_labels:
         participant_id = participant.replace('sub-', '')
@@ -925,6 +926,7 @@ def import_mrs(
             if result.stdout:
                 logger.debug(result.stdout)
             success_count += 1
+            successful_participants.append(participant_id)  # Track successful import
             
             # Compress source data if requested (only after successful conversion)
             if compress_source and not was_extracted:
@@ -964,7 +966,7 @@ def import_mrs(
         logger.info(f"  Failed: {', '.join(failed_participants)}")
     logger.info(f"{'='*60}\n")
     
-    return success_count > 0
+    return (success_count > 0, successful_participants)
 
 
 def validate_mrs_import(
