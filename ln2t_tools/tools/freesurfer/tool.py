@@ -245,6 +245,7 @@ Typical runtime: 6-12 hours per subject
         cmd = build_apptainer_cmd(
             tool="freesurfer",
             fs_license=args.fs_license,
+            version=version,
             rawdata=str(dataset_rawdata),
             derivatives=str(dataset_derivatives),
             participant_label=participant_label,

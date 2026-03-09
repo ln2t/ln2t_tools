@@ -529,13 +529,22 @@ def build_apptainer_cmd(tool: str, **options) -> str:
         except ValueError:
             t1w_container = str(t1w_host)
         
+        # FreeSurfer containers set FREESURFER_HOME to /usr/local/freesurfer/{version}-1
+        # and check $FREESURFER_HOME/.license. Bind to the versioned path when known.
+        version = options.get('version', '')
+        versioned_binding = (
+            f"-B {options['fs_license']}:/usr/local/freesurfer/{version}-1/.license "
+            if version else ""
+        )
+
         cmd = (
             f"apptainer run --cleanenv --containall --writable-tmpfs "
-            f"-B {options['fs_license']}:/usr/local/freesurfer/.license "
             f"-B {options['fs_license']}:/opt/freesurfer/.license "
+            f"{versioned_binding}"
             f"-B {options['rawdata']}:/rawdata:ro -B {options['derivatives']}:/derivatives "
             f"-B {options['derivatives']}:/tmp:rw "
             f"--env TMPDIR=/tmp "
+            f"--env FS_LICENSE=/opt/freesurfer/.license "
             f"{options['apptainer_img']} recon-all -all -subjid {subject_id} "
             f"-i {t1w_container} "
             f"-sd /derivatives/{options['output_label']}"
