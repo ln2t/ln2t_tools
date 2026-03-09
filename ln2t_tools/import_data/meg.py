@@ -26,7 +26,11 @@ try:
     mne.set_log_level('ERROR')
     logging.getLogger('mne_bids').setLevel(logging.ERROR)
     logging.getLogger('mne').setLevel(logging.ERROR)
-    warnings.filterwarnings('ignore')
+    warnings.filterwarnings('ignore', category=DeprecationWarning, module='mne')
+    warnings.filterwarnings('ignore', message='.*headshape.*', category=UserWarning)
+    warnings.filterwarnings('ignore', message='.*does not conform to MNE naming conventions.*')
+    warnings.filterwarnings('ignore', message='.*raw Internal Active Shielding data.*')
+    warnings.filterwarnings('ignore', message='.*No events found or provided.*')
     MNE_AVAILABLE = True
 except ImportError:
     MNE_AVAILABLE = False
@@ -351,83 +355,6 @@ def detect_derivative_split_files(deriv_files: List[Path]) -> Dict[Path, List[Pa
     return split_groups
 
 
-def find_matching_raw_file(
-    derivative_filename: str,
-    raw_files: List[Path],
-    split_file_groups: Dict[Path, List[Path]]
-) -> Optional[Tuple[Path, Optional[int]]]:
-    """Find the raw file that corresponds to a derivative file.
-    
-    Handles both split naming patterns:
-    - file-1_mc.fif (split first, then processing)
-    - file_mc-1.fif (processing first, then split)
-    
-    Parameters
-    ----------
-    derivative_filename : str
-        Name of the derivative file (e.g., 'chessboard1_mc.fif', 'file_mc-1.fif')
-    raw_files : List[Path]
-        List of raw FIF file paths in the session
-    split_file_groups : Dict[Path, List[Path]]
-        Dict mapping primary file → list of all split parts
-    
-    Returns
-    -------
-    Optional[Tuple[Path, Optional[int]]]
-        Tuple of (matching_raw_path, split_index) where:
-        - matching_raw_path: Path to the raw file (primary file if split)
-        - split_index: Index if derivative is a split part (0=primary, 1=first split, etc), None if not split
-        Returns None if no match found
-    """
-    stem = Path(derivative_filename).stem
-    
-    # First, check if there's a split suffix at the end (e.g., file_mc-1 or file-1_mc)
-    split_match = re.match(r'^(.+?)-(\d+)$', stem)
-    split_num = None
-    base_stem_with_proc = stem
-    
-    if split_match:
-        # Has a split suffix: extract it
-        base_stem_with_proc = split_match.group(1)  # e.g., "file_mc" or "file"
-        split_num = int(split_match.group(2))        # e.g., 1, 2, 3
-    
-    # Now extract derivative info from the (possibly split-stripped) stem
-    # Reconstruct filename for derivative extraction
-    temp_filename = base_stem_with_proc + '.fif'
-    deriv_info = extract_derivative_info(temp_filename)
-    
-    if not deriv_info:
-        # Not a derivative file
-        return None
-    
-    base_filename_stem, _ = deriv_info  # e.g., 'file.fif' → 'file'
-    base_filename_stem = Path(base_filename_stem).stem
-    
-    # Now we have the base stem and possibly a split number
-    if split_num is not None:
-        # Derivative is for a split part (e.g., 'file_mc-1.fif' or 'file-1_mc.fif')
-        primary_filename = f"{base_filename_stem}.fif"
-        
-        # Find the primary raw file
-        for raw_path in raw_files:
-            if raw_path.name == primary_filename:
-                # Verify this is actually a split file group
-                if raw_path in split_file_groups:
-                    return (raw_path, split_num)  # split_num matches the -N suffix
-                break
-    else:
-        # Derivative is for primary file (e.g., 'file_mc.fif')
-        primary_filename = f"{base_filename_stem}.fif"
-        for raw_path in raw_files:
-            if raw_path.name == primary_filename:
-                # Check if this raw file is part of a split group
-                if raw_path in split_file_groups:
-                    return (raw_path, 0)  # 0 = primary file
-                else:
-                    return (raw_path, None)  # Not a split file
-    
-    return None
-
 
 def match_file_pattern(filename: str, patterns: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Match a filename against configured patterns.
@@ -480,7 +407,7 @@ def extract_run_from_filename(filename: str, extraction_method: str = "last_digi
     filename : str
         FIF filename
     extraction_method : str
-        Method to use: "last_digits" or "none"
+        Method to use: "last_digits", "first_digits", or "none"
     
     Returns
     -------
@@ -498,7 +425,13 @@ def extract_run_from_filename(filename: str, extraction_method: str = "last_digi
         stem = split_match.group(1)
     
     matches = re.findall(r'\d+', stem)
-    return int(matches[-1]) if matches else None
+    if not matches:
+        return None
+    
+    if extraction_method == "first_digits":
+        return int(matches[0])
+    else:  # "last_digits" or default
+        return int(matches[-1])
 
 
 def find_meg_folder(meg_source_dir: Path, meg_id: str) -> Optional[Path]:
@@ -1060,8 +993,6 @@ def extract_and_write_headshape(
     except Exception as err:
         logger.warning(f"Failed to extract and write headshape points: {err}")
         return None
-
-        return False
 
 
 def convert_raw_file(
@@ -1741,7 +1672,7 @@ def import_meg(
                 split_parts.update(parts[1:])
             primary_raw_files = [f for f in raw_files if f not in split_parts]
             
-            # Match files to patterns and assign run numbers
+            # Match files to patterns and extract run and acq
             logger.info("Matching files to patterns...")
             file_mapping = {}
             for fif_file in primary_raw_files:
@@ -1751,28 +1682,61 @@ def import_meg(
                     task_entities = parse_task_spec(task)
                     run_extraction = pattern_rule.get('run_extraction', 'last_digits')
                     run = extract_run_from_filename(fif_file.name, run_extraction)
-                    file_mapping[fif_file] = (task, task_entities, run, pattern_rule)
-                    logger.debug(f"  {fif_file.name} -> task={task}, run={run}")
+                    
+                    # Extract acquisition label if configured
+                    acq = None
+                    acq_config = pattern_rule.get('acq')
+                    if acq_config:
+                        # Check if acq_config is an extraction method (last_digits, first_digits) or static text
+                        if acq_config in ('last_digits', 'first_digits'):
+                            # Extract number from filename
+                            acq = extract_run_from_filename(fif_file.name, acq_config)
+                            # Convert to string for BIDS
+                            if acq is not None:
+                                acq = str(acq)
+                        else:
+                            # Use as static text
+                            acq = str(acq_config)
+                    
+                    file_mapping[fif_file] = (task, task_entities, run, acq, pattern_rule)
+                    logger.debug(f"  {fif_file.name} -> task={task}, run={run}, acq={acq}")
                 else:
                     logger.warning(f"  ⊘ No matching pattern for: {fif_file.name}")
             
             # Group by task and assign run numbers if needed
             task_files = defaultdict(list)
-            for fif_path, (task, task_entities, run, pattern_rule) in file_mapping.items():
+            for fif_path, (task, task_entities, run, acq, pattern_rule) in file_mapping.items():
                 task_key = task
-                task_files[task_key].append((fif_path, task, task_entities, run))
+                run_extraction = pattern_rule.get('run_extraction', 'last_digits')
+                task_files[task_key].append((fif_path, task, task_entities, run, acq, run_extraction))
             
-            # Reassign run numbers if multiple files per task
+            # Reassign run numbers ONLY if they were not extracted from filenames
             final_mapping = {}
             for task_key, files in task_files.items():
                 if len(files) == 1:
-                    fif_path, task, task_entities, _ = files[0]
-                    final_mapping[fif_path] = (task, task_entities, None)
+                    fif_path, task, task_entities, run, acq, run_extraction = files[0]
+                    final_mapping[fif_path] = (task, task_entities, run, acq)  # Keep extracted run and acq (or None)
                 else:
-                    # Sort by run number from filename, then by filename
-                    sorted_files = sorted(files, key=lambda x: (x[3] if x[3] is not None else float('inf'), x[0].name))
-                    for idx, (fif_path, task, task_entities, _) in enumerate(sorted_files, start=1):
-                        final_mapping[fif_path] = (task, task_entities, idx)
+                    # Multiple files per task
+                    # Check if any files have extracted run numbers
+                    has_extracted_runs = any(run is not None for _, _, _, run, _, _ in files)
+                    
+                    # Check if run_extraction was explicitly disabled
+                    run_extraction_disabled = all(run_ext == "none" for _, _, _, _, _, run_ext in files)
+                    
+                    if has_extracted_runs:
+                        # Keep extracted run numbers as-is
+                        for fif_path, task, task_entities, run, acq, _ in files:
+                            final_mapping[fif_path] = (task, task_entities, run, acq)
+                    elif run_extraction_disabled:
+                        # run_extraction is explicitly "none" - don't assign sequential numbers
+                        for fif_path, task, task_entities, _, acq, _ in files:
+                            final_mapping[fif_path] = (task, task_entities, None, acq)
+                    else:
+                        # No run numbers extracted and not explicitly disabled - assign sequential numbers (original behavior)
+                        sorted_files = sorted(files, key=lambda x: (x[3] if x[3] is not None else float('inf'), x[0].name))
+                        for idx, (fif_path, task, task_entities, _, acq, _) in enumerate(sorted_files, start=1):
+                            final_mapping[fif_path] = (task, task_entities, idx, acq)
             
             # Convert files
             logger.info("Converting files...")
@@ -1781,8 +1745,12 @@ def import_meg(
                     stats.add_file('unknown', 'skipped', fif_path.name)
                     continue
                 
-                task, task_entities, run = final_mapping[fif_path]
+                task, task_entities, run, acq = final_mapping[fif_path]
                 split_parts_for_file = split_file_groups.get(fif_path, None)
+                
+                # Merge extracted acq into task_entities if present
+                if acq is not None and task_entities is not None:
+                    task_entities['acq'] = acq
                 
                 success = convert_raw_file(
                     fif_path, participant_id, session_id, task, run,
