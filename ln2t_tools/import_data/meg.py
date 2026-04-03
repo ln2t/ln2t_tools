@@ -37,6 +37,455 @@ except ImportError:
     logger.warning("MNE-Python and mne-bids not available. Install with: pip install mne mne-bids")
 
 
+def get_fif_header_info(file_path: Path) -> Optional[Dict[str, Any]]:
+    """Extract metadata from FIF file header without loading full data.
+    
+    Reads only the FIF header to extract:
+    - file_id: Machine/system identifier for split file detection
+    - meas_date: Recording timestamp
+    - n_samples: Total samples in file
+    - sfreq: Sampling frequency
+    - n_channels: Number of channels
+    
+    This is fast (header only) and helps identify genuine split files vs duplicates.
+    
+    Parameters
+    ----------
+    file_path : Path
+        Path to FIF file
+    
+    Returns
+    -------
+    Optional[Dict[str, Any]]
+        Dictionary with header info, or None if read failed
+    """
+    if not MNE_AVAILABLE:
+        return None
+    
+    try:
+        raw = mne.io.read_raw_fif(file_path, preload=False, allow_maxshield=True, verbose=False)
+        
+        file_id = raw.info.get('file_id', {})
+        meas_date = raw.info.get('meas_date')
+        
+        # Convert datetime to string for hashing
+        meas_date_str = None
+        if meas_date:
+            if isinstance(meas_date, datetime):
+                meas_date_str = meas_date.isoformat()
+            elif isinstance(meas_date, date):
+                meas_date_str = meas_date.isoformat()
+        
+        # Extract split structure info (first_samps and last_samps)
+        first_samps = getattr(raw, '_first_samps', None)
+        last_samps = getattr(raw, '_last_samps', None)
+        
+        return {
+            'file_id': file_id,
+            'meas_date': meas_date_str,
+            'n_samples': raw.n_times,
+            'sfreq': raw.info.get('sfreq'),
+            'n_channels': len(raw.ch_names),
+            'duration_sec': raw.times[-1] if len(raw.times) > 0 else 0,
+            'first_samps': first_samps,
+            'last_samps': last_samps,
+            'is_primary': first_samps is not None and len(first_samps) > 1,
+            'n_parts': len(first_samps) if first_samps is not None else 1,
+        }
+    except Exception as e:
+        logger.warning(f"Failed to read FIF header from {file_path.name}: {e}")
+        return None
+
+
+def inspect_fif_header(fif_path: Path, verbose: bool = True) -> Optional[Dict[str, Any]]:
+    """Inspect and display detailed FIF header information for debugging.
+    
+    Shows all relevant metadata for understanding split files and duplicates:
+    - file_id fields (version, machine_id, secs, usecs) - SAME for split parts
+    - Duration and samples - DIFFERENT for each split part
+    - Whether file is detected as part of split series
+    
+    Parameters
+    ----------
+    fif_path : Path
+        Path to FIF file
+    verbose : bool
+        If True, print detailed information to logger
+    
+    Returns
+    -------
+    Optional[Dict[str, Any]]
+        Dictionary with detailed header information, or None if read failed
+    """
+    if not MNE_AVAILABLE:
+        logger.warning(f"MNE not available - cannot inspect {fif_path.name}")
+        return None
+    
+    try:
+        raw = mne.io.read_raw_fif(fif_path, preload=False, allow_maxshield=True, verbose=False)
+        
+        file_id = raw.info.get('file_id', {})
+        meas_date = raw.info.get('meas_date')
+        
+        result = {
+            'filename': fif_path.name,
+            'meas_date': str(meas_date) if meas_date else None,
+            'duration_sec': raw.times[-1] if len(raw.times) > 0 else 0,
+            'n_samples': raw.n_times,
+            'n_channels': len(raw.ch_names),
+            'sfreq': raw.info.get('sfreq'),
+            'file_id': file_id,
+        }
+        
+        if verbose:
+            logger.info(f"FIF Header: {fif_path.name}")
+            logger.info(f"  Meas date: {result['meas_date']}")
+            logger.info(f"  Duration: {result['duration_sec']:.1f}s")
+            logger.info(f"  Samples: {result['n_samples']:,}")
+            logger.info(f"  Channels: {result['n_channels']}")
+            logger.info(f"  Sfreq: {result['sfreq']} Hz")
+            
+            if file_id:
+                logger.info(f"  File ID:")
+                for key, value in file_id.items():
+                    logger.info(f"    {key}: {value}")
+            
+            # Check for split part information stored by MNE
+            if hasattr(raw, '_first_samps') and hasattr(raw, '_last_samps'):
+                logger.info(f"  Split info (internal):")
+                logger.info(f"    First samples: {raw._first_samps}")
+                logger.info(f"    Last samples: {raw._last_samps}")
+        
+        return result
+        
+    except Exception as e:
+        if verbose:
+            logger.warning(f"Failed to inspect FIF header from {fif_path.name}: {e}")
+        return None
+
+
+def identify_primary_files(fif_files: List[Path]) -> Tuple[List[Path], int]:
+    """Identify and filter FIF files by separating PRIMARY, SECONDARY, and STANDALONE.
+    
+    Algorithm - Three-phase approach:
+    
+    PHASE 1: Classify files by split structure
+    - PRIMARY: len(first_samps) > 1 (split group headers)
+    - OTHER: len(first_samps) == 1 (SECONDARY or STANDALONE)
+    
+    PHASE 2: Process PRIMARY files
+    - Group by fingerprint (meas_date, first_samps_tuple)
+    - For each group: keep preferred suffix variant (underscore > dash > none)
+    - SECONDARY files linked to excluded PRIMARY are also excluded
+    
+    PHASE 3: Process STANDALONE files (not linked to any PRIMARY)
+    - Group by fingerprint (meas_date, first_samps_tuple)
+    - For each group: keep preferred suffix variant (underscore > dash > none)
+    
+    Result: PRIMARY (kept) + STANDALONE (kept) + SECONDARY (all kept PRIMARY's parts)
+    
+    Parameters
+    ----------
+    fif_files : List[Path]
+        List of FIF file paths
+    
+    Returns
+    -------
+    List[Path]
+        List of files to process (duplicates removed, relationships preserved)
+    """
+    if not MNE_AVAILABLE:
+        logger.warning("MNE not available, cannot identify primary files intelligently. Keeping all files.")
+        return list(fif_files), 0
+    
+    # Read headers for all files
+    file_headers = {}
+    for fif_file in fif_files:
+        header_info = get_fif_header_info(fif_file)
+        if header_info:
+            file_headers[fif_file] = header_info
+        else:
+            # If we can't read header, keep the file
+            file_headers[fif_file] = None
+    
+    # Helper: Extract suffix type from filename
+    def get_filename_suffix_type(filename: str) -> str:
+        """Return suffix type: 'underscore', 'dash', or 'none'."""
+        stem = filename[:-4] if filename.endswith('.fif') else filename
+        
+        # Match underscore suffix: base_N
+        if re.search(r'^.+_\d+$', stem):
+            return 'underscore'
+        
+        # Match dash suffix: base-N
+        if re.search(r'^.+?-\d+$', stem):
+            return 'dash'
+        
+        # No numeric suffix
+        return 'none'
+    
+    # Helper: Create fingerprint from file metadata
+    def get_fingerprint(file_path: Path) -> tuple:
+        """Fingerprint = (meas_date, first_samps_tuple)."""
+        hdr = file_headers.get(file_path)
+        if not hdr:
+            return ('unknown', file_path.name)
+        
+        first_samps = hdr['first_samps']
+        first_samp_tuple = tuple(int(s) for s in first_samps) if first_samps is not None else ()
+        meas_date = hdr['meas_date'] or 'unknown'
+        
+        return (meas_date, first_samp_tuple)
+    
+    # Helper: Process a group of files with same fingerprint
+    def process_duplicate_group(files_in_group: List[Path]) -> Path:
+        """Select best file from duplicates (underscore > dash > none)."""
+        if len(files_in_group) == 1:
+            return files_in_group[0]
+        
+        files_sorted = sorted(
+            files_in_group,
+            key=lambda f: (
+                0 if get_filename_suffix_type(f.name) == 'underscore' else (
+                    1 if get_filename_suffix_type(f.name) == 'dash' else 2
+                ),
+                f.name
+            )
+        )
+        
+        canonical = files_sorted[0]
+        
+        # Log duplicates in clean format: kept <-> excluded
+        if len(files_sorted) > 1:
+            kept = files_sorted[0].name
+            for excluded_file in files_sorted[1:]:
+                logger.info(f"  → {kept} <-> {excluded_file.name}")
+        
+        return canonical
+    
+    # Helper: Parse filename to extract base name, number, and separator
+    def parse_filename_with_number(filename: str) -> tuple:
+        """
+        Parse filename like 'base_1.fif' or 'base-2.fif'
+        Returns: (base_name, number, separator) or (None, None, None) if no number found
+        E.g., 'MEG_4157_RestEyesClosed-2.fif' -> ('MEG_4157_RestEyesClosed', 2, '-')
+        """
+        stem = filename[:-4] if filename.endswith('.fif') else filename
+        
+        # Try matching underscore: base_N
+        match = re.search(r'^(.+)_(\d+)$', stem)
+        if match:
+            return (match.group(1), int(match.group(2)), '_')
+        
+        # Try matching dash: base-N
+        match = re.search(r'^(.+?)-([\d]+)$', stem)
+        if match:
+            return (match.group(1), int(match.group(2)), '-')
+        
+        return (None, None, None)
+    
+    # Helper: Check if a file matches an excluded PRIMARY by filename pattern
+    def matches_excluded_primary(file_path: Path, excluded_primary_path: Path) -> bool:
+        """
+        Check if file matches excluded PRIMARY by filename pattern.
+        E.g., if excluding 'base-2.fif', files 'base-1.fif', 'base-3.fif', etc. match if same base/separator.
+        Also validate: same meas_date as excluded PRIMARY.
+        """
+        base_excl, num_excl, sep_excl = parse_filename_with_number(excluded_primary_path.name)
+        base_file, num_file, sep_file = parse_filename_with_number(file_path.name)
+        
+        # Must have parsed successfully
+        if base_excl is None or base_file is None:
+            return False
+        
+        # Must have same base name and separator
+        if base_excl != base_file or sep_excl != sep_file:
+            return False
+        
+        # Check meas_date match
+        hdr_excl = file_headers.get(excluded_primary_path)
+        hdr_file = file_headers.get(file_path)
+        
+        if not hdr_excl or not hdr_file:
+            return False
+        
+        # Must have same measurement date
+        if hdr_excl['meas_date'] != hdr_file['meas_date']:
+            return False
+        
+        # Match any numbered file with same base/separator/date
+        # (all parts of the same split group)
+        return True
+    
+    logger.info("Identifying duplicate files...")
+    
+    # ========== PHASE 1: Classify files by split structure ==========
+    primary_files = []
+    other_files = []
+    
+    for fif_file in sorted(fif_files):
+        hdr = file_headers.get(fif_file)
+        if hdr and hdr['first_samps'] is not None and len(hdr['first_samps']) > 1:
+            primary_files.append(fif_file)
+        else:
+            other_files.append(fif_file)
+    
+    # ========== PHASE 2: Process PRIMARY files ==========
+    # For PRIMARY files, duplicates are identified by:
+    # - Same meas_date AND
+    # - Same first_samps[0] (the main recording start point)
+    # We DON'T compare the entire first_samps array because split structure may vary
+    primary_by_fp = defaultdict(list)
+    for fif_file in primary_files:
+        hdr = file_headers.get(fif_file)
+        if hdr and hdr['first_samps'] is not None and len(hdr['first_samps']) > 0 and hdr['meas_date']:
+            # For PRIMARY, fingerprint = (meas_date, first_samps[0] only)
+            first_samp = int(hdr['first_samps'][0])
+            meas_date = hdr['meas_date']
+            fp = (meas_date, first_samp)  # Only first element for PRIMARY
+        else:
+            # No valid header, use filename as fallback
+            fp = ('unknown', fif_file.name)
+        primary_by_fp[fp].append(fif_file)
+    
+    kept_primary_files = set()  # Use set to track by path
+    excluded_primary_files = set()  # Use set to track excluded PRIMARY files
+    
+    for fp, files_in_group in primary_by_fp.items():
+        canonical = process_duplicate_group(files_in_group)
+        kept_primary_files.add(canonical)
+        # Track files that were excluded from this group
+        for fif_file in files_in_group:
+            if fif_file != canonical:
+                excluded_primary_files.add(fif_file)
+    
+
+    
+    # ========== PHASE 3: Link SECONDARY files to KEPT PRIMARY ==========
+    # Kept PRIMARY files are form: base_X.fif (underscore)
+    # Their SECONDARY files are form: base_X-N.fif (dash pattern)
+    # SECONDARY candidate = len(first_samps) == 1 with valid meas_date
+    # - If matches kept PRIMARY (same base, dash pattern, same date) → KEPT
+    # - If duplicate of kept SECONDARY (same first_samps[0] + meas_date) → EXCLUDED
+    # - Otherwise → STANDALONE
+    # Non-SECONDARY files → STANDALONE
+    
+    # Build map of kept PRIMARY files: base_stem -> meas_date
+    kept_primary_map = {}
+    for kept_primary in kept_primary_files:
+        hdr = file_headers.get(kept_primary)
+        if hdr and hdr['meas_date']:
+            stem = kept_primary.name[:-4]  # Remove .fif extension
+            kept_primary_map[stem] = hdr['meas_date']
+    
+    secondary_files = []
+    standalone_files = []
+    excluded_secondary_files = []
+    
+    # First pass: identify SECONDARY files linked to kept PRIMARY
+    for fif_file in other_files:
+        hdr = file_headers.get(fif_file)
+        
+        # Check if this is a SECONDARY candidate
+        is_secondary_candidate = (hdr and hdr['meas_date'] and 
+                                 hdr['first_samps'] is not None and 
+                                 len(hdr['first_samps']) == 1)
+        
+        if not is_secondary_candidate:
+            # Not a SECONDARY candidate, treat as STANDALONE
+            standalone_files.append(fif_file)
+            continue
+        
+        # It's a SECONDARY candidate - check if matches a kept PRIMARY
+        matched_to_kept = False
+        
+        # Parse filename to check for dash pattern
+        base_file, num_file, sep_file = parse_filename_with_number(fif_file.name)
+        
+        if base_file and sep_file == '-':
+            for primary_stem, primary_meas_date in kept_primary_map.items():
+                # Parse the kept primary's stem
+                primary_base, primary_num, primary_sep = parse_filename_with_number(primary_stem + ".fif")
+                
+                # Match if: same base + primary has underscore + file has dash + same meas_date
+                if (base_file == primary_base and 
+                    primary_sep == '_' and 
+                    hdr and hdr['meas_date'] == primary_meas_date):
+                    secondary_files.append(fif_file)
+                    logger.debug(f"  SECONDARY (kept): {fif_file.name} -> linked to {primary_stem}.fif")
+                    matched_to_kept = True
+                    break
+        
+        # If not linked to a kept PRIMARY, it will be checked for duplicates in second pass
+        if not matched_to_kept:
+            standalone_files.append(fif_file)  # Tentatively treat as standalone
+    
+    # Second pass: among tentatively-standalone SECONDARY candidates, find duplicates of kept SECONDARY files
+    # A duplicate SECONDARY has same first_samps[0] and meas_date as a kept SECONDARY
+    for fif_file in list(standalone_files):
+        hdr = file_headers.get(fif_file)
+        
+        # Check if this is a SECONDARY candidate
+        is_secondary_candidate = (hdr and hdr['meas_date'] and 
+                                 hdr['first_samps'] is not None and 
+                                 len(hdr['first_samps']) == 1)
+        
+        if not is_secondary_candidate or not hdr:
+            continue  # Not a SECONDARY candidate, keep as standalone
+        
+        # Check if it's a duplicate of any kept SECONDARY
+        first_samp = int(hdr['first_samps'][0])
+        meas_date = hdr['meas_date']
+        candidate_fp = (first_samp, meas_date)
+        
+        is_duplicate = False
+        for kept_sec in secondary_files:
+            kept_hdr = file_headers.get(kept_sec)
+            if kept_hdr and kept_hdr['first_samps'] is not None and len(kept_hdr['first_samps']) == 1:
+                kept_first_samp = int(kept_hdr['first_samps'][0])
+                kept_meas_date = kept_hdr['meas_date']
+                kept_fp = (kept_first_samp, kept_meas_date)
+                
+                if candidate_fp == kept_fp:
+                    is_duplicate = True
+                    break
+        
+        if is_duplicate:
+            # Move from standalone to excluded_secondary
+            standalone_files.remove(fif_file)
+            excluded_secondary_files.append(fif_file)
+            logger.debug(f"  SECONDARY (excluded - duplicate): {fif_file.name}")
+    
+
+    
+    # ========== PHASE 4: Process STANDALONE files ==========
+    standalone_by_fp = defaultdict(list)
+    for fif_file in standalone_files:
+        fp = get_fingerprint(fif_file)
+        standalone_by_fp[fp].append(fif_file)
+    
+    kept_standalone_files = []
+    
+    for fp, files_in_group in standalone_by_fp.items():
+        canonical = process_duplicate_group(files_in_group)
+        kept_standalone_files.append(canonical)
+    
+
+    
+    # ========== PHASE 5: Combine results ==========
+    # Result = PRIMARY (kept) + STANDALONE (kept)
+    # SECONDARY files are NOT converted (only used for linked detection)
+    # EXCLUDED: PRIMARY (duplicates), SECONDARY (all), STANDALONE (duplicates)
+    files_to_keep = list(kept_primary_files) + kept_standalone_files
+    
+    # Count split groups based on first_samps metadata (kept PRIMARY files only)
+    split_group_count = sum(1 for kp in kept_primary_files 
+                           if (file_headers.get(kp, {}).get('first_samps') is not None 
+                           and len(file_headers.get(kp, {}).get('first_samps', [])) > 1))
+    
+    return files_to_keep, split_group_count
+
+
 class ConversionStats:
     """Track conversion statistics for reporting."""
     
@@ -507,10 +956,11 @@ def match_file_pattern(filename: str, patterns: List[Dict[str, Any]]) -> Optiona
     return None
 
 
-def extract_run_from_filename(filename: str, extraction_method: str = "last_digits") -> Optional[int]:
+def extract_run_from_filename(filename: str, extraction_method: str = "last_digits", meg_id: Optional[str] = None) -> Optional[int]:
     """Extract run number from filename.
     
     Excludes split file patterns (e.g., -1.fif, -2.fif).
+    Rejects if the extracted number matches the meg_id.
     
     Parameters
     ----------
@@ -518,6 +968,8 @@ def extract_run_from_filename(filename: str, extraction_method: str = "last_digi
         FIF filename
     extraction_method : str
         Method to use: "last_digits", "first_digits", or "none"
+    meg_id : Optional[str]
+        MEG ID to exclude from run number extraction
     
     Returns
     -------
@@ -539,9 +991,20 @@ def extract_run_from_filename(filename: str, extraction_method: str = "last_digi
         return None
     
     if extraction_method == "first_digits":
-        return int(matches[0])
+        candidate = int(matches[0])
     else:  # "last_digits" or default
-        return int(matches[-1])
+        candidate = int(matches[-1])
+    
+    # Reject if it matches the meg_id
+    if meg_id is not None:
+        try:
+            meg_id_num = int(meg_id)
+            if candidate == meg_id_num:
+                return None
+        except (ValueError, TypeError):
+            pass
+    
+    return candidate
 
 
 def find_meg_folder(meg_source_dir: Path, meg_id: str) -> Optional[Path]:
@@ -1148,13 +1611,34 @@ def convert_raw_file(
     allow_maxshield = config.get('options', {}).get('allow_maxshield', True)
     overwrite = config.get('options', {}).get('overwrite', True)
     
-    run_str = f" (run {run})" if run is not None else ""
-    split_str = f" ({len(split_parts)} parts)" if split_parts and len(split_parts) > 1 else ""
-    logger.info(f"  ✓ Converting: {fif_path.name}{run_str}{split_str} -> task={task}")
+    # Build info string with run and parts count (in separate parens before arrow)
+    info_parts = []
+    if run is not None:
+        info_parts.append(f"run {run}")
+    
+    info_str = f" ({', '.join(info_parts)})" if info_parts else ""
+    
+    # Check if file is part of a split group based on first_samps
+    try:
+        raw_temp = mne.io.read_raw_fif(fif_path, preload=False, allow_maxshield=allow_maxshield, verbose=False)
+        first_samps = getattr(raw_temp, '_first_samps', None)
+        if first_samps is not None and len(first_samps) > 1:
+            info_str += f" ({len(first_samps)} parts)"
+    except:
+        pass
+    
+    # Build suffix string with task and acq (after arrow)
+    suffix_parts = [f"task={task}"]
+    if task_entities and task_entities.get('acq'):
+        suffix_parts.append(f"acq={task_entities['acq']}")
+    suffix_str = ", ".join(suffix_parts)
+    
+    logger.info(f"  ✓ Converting: {fif_path.name}{info_str} -> {suffix_str}")
     
     try:
         # MNE automatically handles split files
         raw = mne.io.read_raw_fif(fif_path, preload=False, allow_maxshield=allow_maxshield, verbose=False)
+        
         normalize_raw_info(raw)
 
         if task_entities is None:
@@ -1177,7 +1661,12 @@ def convert_raw_file(
         mne_bids.write._FIFF_SPLIT_SIZE = "1900MB"
         
         write_raw_bids(raw, bids_path, overwrite=overwrite, verbose=False)
-        logger.debug(f"    -> Saved BIDS file: {bids_path.basename}")
+        
+        # Clean up temporary FIF read if it was created
+        try:
+            raw_temp.close()
+        except:
+            pass
         
         # Extract headshape file (no-op if already created)
         extract_and_write_headshape(raw, subject, session, bids_root, datatype)
@@ -1860,10 +2349,17 @@ def import_meg(
                 else:
                     logger.info("  ℹ No calibration files found")
             
+            # Identify primary files (remove duplicates) - returns (files, split_group_count)
+            raw_files, split_group_count = identify_primary_files(raw_files)
+            
             # Detect split files
             split_file_groups = detect_split_files(raw_files)
-            if split_file_groups:
-                logger.info(f"Detected {len(split_file_groups)} split file group(s)")
+            
+            # Log processing summary with split group info (counted from first_samps metadata)
+            split_info = ""
+            if split_group_count > 0:
+                split_info = f" (+ {split_group_count} split group{'s' if split_group_count != 1 else ''})"
+            logger.info(f"Processing {len(raw_files)} raw file(s){split_info}, {len(derivative_files)} derivative file(s)")
             
             # Get primary files only (exclude split parts)
             # Get primary files only (exclude split parts)
@@ -1881,7 +2377,7 @@ def import_meg(
                     task = pattern_rule.get('task', 'unknown')
                     task_entities = parse_task_spec(task)
                     run_extraction = pattern_rule.get('run_extraction', 'last_digits')
-                    run = extract_run_from_filename(fif_file.name, run_extraction)
+                    run = extract_run_from_filename(fif_file.name, run_extraction, meg_id)
                     
                     # Extract acquisition label if configured
                     acq = None
@@ -1890,7 +2386,7 @@ def import_meg(
                         # Check if acq_config is an extraction method (last_digits, first_digits) or static text
                         if acq_config in ('last_digits', 'first_digits'):
                             # Extract number from filename
-                            acq = extract_run_from_filename(fif_file.name, acq_config)
+                            acq = extract_run_from_filename(fif_file.name, acq_config, meg_id)
                             # Convert to string for BIDS
                             if acq is not None:
                                 acq = str(acq)
@@ -2014,7 +2510,7 @@ def import_meg(
                                 # Check if acq_config is an extraction method (last_digits, first_digits) or static text
                                 if acq_config in ('last_digits', 'first_digits'):
                                     # Extract number from filename
-                                    acq = extract_run_from_filename(deriv_file.name, acq_config)
+                                    acq = extract_run_from_filename(deriv_file.name, acq_config, meg_id)
                                     # Convert to string for BIDS
                                     if acq is not None:
                                         acq = str(acq)
@@ -2036,20 +2532,25 @@ def import_meg(
                                 # Check if corresponding raw file was a split
                                 if (task_organization[task]['has_splits'] and 
                                     deriv_base in task_organization[task]['base_names']):
-                                    # This is a split file group, not different runs
+                                    # This is a split file group
                                     is_split = True
-                                    run = None
+                                    # Even for splits, extract run number from derivative base name
+                                    # Example: RS_1_sss.fif and RS_1-1_sss.fif -> both have run=1
+                                    run = extract_run_from_filename(deriv_file.name, run_extraction, meg_id)
                                 else:
                                     # This is a run-based organization
-                                    run = extract_run_from_filename(deriv_file.name, run_extraction)
+                                    run = extract_run_from_filename(deriv_file.name, run_extraction, meg_id)
                             else:
                                 # No corresponding raw file info, use default extraction
-                                run = extract_run_from_filename(deriv_file.name, run_extraction)
+                                run = extract_run_from_filename(deriv_file.name, run_extraction, meg_id)
                             
                             # Format log message
                             if is_split and split_parts_for_deriv:
                                 num_parts = len(split_parts_for_deriv)
-                                run_str = f" ({num_parts} parts)"
+                                if run is not None:
+                                    run_str = f" ({num_parts} parts, run {run})"
+                                else:
+                                    run_str = f" ({num_parts} parts)"
                             elif run is not None:
                                 run_str = f" (run {run})"
                             else:
@@ -2089,7 +2590,7 @@ def import_meg(
                                 # Check if acq_config is an extraction method (last_digits, first_digits) or static text
                                 if acq_config in ('last_digits', 'first_digits'):
                                     # Extract number from filename
-                                    acq = extract_run_from_filename(primary_file.name, acq_config)
+                                    acq = extract_run_from_filename(primary_file.name, acq_config, meg_id)
                                     # Convert to string for BIDS
                                     if acq is not None:
                                         acq = str(acq)
@@ -2101,17 +2602,20 @@ def import_meg(
                             run = None
                             if task in task_organization:
                                 deriv_base = base_filename.split('-')[0]
-                                if not (task_organization[task]['has_splits'] and 
-                                        deriv_base in task_organization[task]['base_names']):
-                                    # This split group should be treated as run-based
-                                    run = extract_run_from_filename(primary_file.name, run_extraction)
+                                # For split groups, always extract run number from the base filename
+                                # Example: RS_1_sss.fif (split primary) has run=1 embedded
+                                run = extract_run_from_filename(primary_file.name, run_extraction, meg_id)
                             else:
                                 # No corresponding raw file info, use default extraction
-                                run = extract_run_from_filename(primary_file.name, run_extraction)
+                                run = extract_run_from_filename(primary_file.name, run_extraction, meg_id)
                             
                             # Log split file group processing
                             num_parts = len(split_parts)
-                            logger.info(f"  ✓ Converting: {primary_file.name} ({num_parts} parts) -> task={task}, acq={acq} (proc-{proc_label})")
+                            if run is not None:
+                                run_str = f" ({num_parts} parts, run {run})"
+                            else:
+                                run_str = f" ({num_parts} parts)"
+                            logger.info(f"  ✓ Converting: {primary_file.name}{run_str} -> task={task}, acq={acq} (proc-{proc_label})")
                             
                             success = copy_derivative_file(
                                 primary_file, participant_id, session_id, task, run,
