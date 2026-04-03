@@ -82,6 +82,17 @@ ln2t_tools import \
 
 Processes physiological recordings (respiratory, cardiac) using built-in in-house processing with your `physio.json` configuration.
 
+### MEG Only
+
+```bash
+ln2t_tools import \
+  --dataset <dataset-name> \
+  --participant-label 001 002 \
+  --datatype meg
+```
+
+Imports MEG data (raw FIF files from Neuromag/Elekta/MEGIN systems) and converts them to BIDS format using your `meg2bids.json` configuration. Handles split files, automatic deduplication, and optional MaxFilter SSS processing.
+
 ### Physio with phys2bids
 
 ```bash
@@ -447,7 +458,120 @@ This means physiological recording started 40 seconds before the first fMRI volu
 
 ---
 
+### MEG Configuration (`meg2bids.json`)
+
+**Purpose**: Define how to convert raw MEG FIF files to BIDS format, handle split files, and configure optional MaxFilter spatial filtering.
+
+**Search paths**:
+- `~/sourcedata/<dataset>-sourcedata/configs/meg2bids.json`
+- `~/sourcedata/<dataset>-sourcedata/meg2bids/config.json`
+
+**What it does**:
+- Maps raw FIF filenames to task labels and acquisition parameters
+- Defines run number extraction method (last digits, first digits, or manual)
+- Configures optional MaxFilter processing (head position correction, SSS filtering)
+- Specifies calibration file locations for MaxFilter
+- Handles multi-run and split file acquisition patterns
+- Automatically detects and deduplicates split files (filename-1.fif, filename-2.fif, etc.)
+
+**Example Configuration**:
+```json
+{
+  "patterns": [
+    {
+      "pattern": "*_RestEyesClosed*",
+      "task": "rest",
+      "acq": "ec",
+      "description": "Resting state eyes closed"
+    },
+    {
+      "pattern": "*_Motor*",
+      "task": "motor",
+      "description": "Motor task with eyes closed"
+    },
+    {
+      "pattern": "*_Noise*",
+      "task": "noise",
+      "description": "Empty room noise measurement"
+    }
+  ],
+  "run_extraction": {
+    "method": "last_digits",
+    "exclude_meg_id": true
+  },
+  "maxfilter": {
+    "enabled": true,
+    "version": "2.2.11"
+    }
+  },
+  "exclude_patterns": [
+    "*test*",
+    "*demo*",
+    "*junk*"
+  ]
+}
+```
+
+**Key Fields**:
+- `patterns`: Array of filename pattern definitions matching raw FIF files
+  - `pattern`: Wildcard pattern (e.g., `"*_RestEyesClosed*"`)
+  - `task`: BIDS task label, optionally with entities (e.g., `"rest"` or `"motor"`)
+  - `acq`: BIDS acquisition label (e.g., `"ec"` or `"suppine"`)
+  - `description`: Human-readable description of the acquisition
+  
+- `run_extraction`: How to extract run numbers from filenames
+  - `method`: `"last_digits"`, `"first_digits"`, or `"none"` (no run extraction)
+  - `exclude_meg_id`: If true, ignores any digits matching the MEG ID when extracting runs
+
+- `maxfilter` (Optional): MaxFilter processing configuration
+  - `enabled`: Enable/disable MaxFilter preprocessing (default: false)
+  - `version`: MaxFilter version string to use
+
+- `exclude_patterns`: Filename patterns to skip during import
+  - Matches case-insensitively
+  - Examples: `"*test*"`, `"*demo*"`, `"*junk*"`
+
+**Split File Handling**:
+The tool automatically:
+- Detects multi-part FIF files (filename.fif, filename-1.fif, filename-2.fif, etc.)
+- Removes duplicate files (keeps one canonical, removes rest)
+- Deduplicates by measurement date and first sample point(s)
+- Prefers files with underscores in suffix over dashes
+- Reports excluded files in verbose logging output
+
+**Example Scenario**:
+Raw files:
+```
+MEG_4157_RestEyesClosed.fif       (primary file, 2 parts)
+MEG_4157_RestEyesClosed-1.fif     (part 2, excluded as duplicate)
+MEG_4158_RestEyesClosed_2.fif     (another participant, kept)
+MEG_4159_RestEyesClosed_2.fif     (another participant, kept)
+```
+
+After deduplication:
+- `MEG_4157_RestEyesClosed.fif` is converted as: `(run 3, 2 parts) -> task=rest`
+- Parts are handled automatically by MNE during conversion
+
+---
+
 ## Requirements and Dependencies
+
+### MEG Import Requirements
+- **Raw FIF files**: From Neuromag/Elekta/MEGIN MEG systems
+  - Files automatically detected in sourcedata directory
+  - Split files (filename-1.fif, filename-2.fif) detected and deduplicated
+- **`mne-python`**: MEG data processing library
+  - Install: `pip install mne mne-bids`
+  - Used to read/write FIF files and convert to BIDS format
+- **`mne-bids`**: BIDS integration for MNE
+  - Automatic dependency with mne-python
+  - Handles BIDS-compliant file organization and metadata
+- **Configuration**: JSON file defining task patterns and optional MaxFilter parameters (see Configuration Files section)
+- **Optional - MaxFilter Processing**:
+  - MaxFilter binary from Neuromag/Elekta/MEGIN software installation
+  - Enables spatial filtering (SSS) and head motion correction
+  - Requires: licensemanager and Maxwell filter environment setup
+  - Calibration files: crosstalk and fine-calibration .dat files
 
 ### DICOM Import Requirements
 - **`dcm2bids`**: Python package for DICOM to BIDS conversion
@@ -548,6 +672,25 @@ ln2t_tools import \
 tree ~/rawdata/${DATASET}-rawdata
 ```
 
+### MEG-Only Import
+
+```bash
+# MEG dataset
+DATASET="2024-MEG_Study-abc123"
+PARTICIPANTS="001 002 003"
+DS_INITIALS="MEG"
+
+# Import MEG data with deduplication and task mapping
+ln2t_tools import \
+  --dataset $DATASET \
+  --participant-label $PARTICIPANTS \
+  --ds-initials $DS_INITIALS \
+  --datatype meg
+
+# Output: raw FIF files converted to BIDS format with split-file deduplication
+ls ~/rawdata/${DATASET}-rawdata/sub-001/meg/
+```
+
 ### Multi-Session Import
 
 ```bash
@@ -593,6 +736,17 @@ After successful import, your dataset will be organized in BIDS format in the `r
 │   │   ├── sub-001_dwi.bvec
 │   │   ├── sub-001_dwi.json
 │   │   └── ...
+│   ├── meg/               # MEG raw data
+│   │   ├── sub-001_task-rest_meg.fif
+│   │   ├── sub-001_task-rest_meg.json
+│   │   ├── sub-001_task-motor_run-01_meg.fif
+│   │   ├── sub-001_task-motor_run-01_meg.json
+│   │   ├── sub-001_task-motor_run-02_meg.fif
+│   │   ├── sub-001_task-motor_run-02_meg.json
+│   │   ├── sub-001_headshape.pos
+│   │   ├── sub-001_meg_crosstalk.fif
+│   │   ├── sub-001_meg_calibration.dat
+│   │   └── ...
 │   └── mrs/               # MR Spectroscopy data
 │       ├── sub-001_mrs.nii.gz
 │       └── sub-001_mrs.json
@@ -606,6 +760,13 @@ After successful import, your dataset will be organized in BIDS format in the `r
 │   │   │   ├── sub-002_ses-01_task-rest_bold.json
 │   │   │   ├── sub-002_ses-01_task-rest_physio.tsv.gz
 │   │   │   ├── sub-002_ses-01_task-rest_physio.json
+│   │   │   └── ...
+│   │   ├── meg/
+│   │   │   ├── sub-002_ses-01_task-rest_meg.fif
+│   │   │   ├── sub-002_ses-01_task-rest_meg.json
+│   │   │   ├── sub-002_ses-01_headshape.pos
+│   │   │   ├── sub-002_ses-01_meg_crosstalk.fif
+│   │   │   ├── sub-002_ses-01_meg_calibration.dat
 │   │   │   └── ...
 │   │   └── mrs/
 │   │       ├── sub-002_ses-01_mrs.nii.gz
@@ -656,6 +817,47 @@ After successful import, your dataset will be organized in BIDS format in the `r
 ```
 
 The StartTime indicates when physiological recording began relative to the first fMRI volume (negative = before first volume).
+
+**MEG data** (`sub-XXX_task-rest_meg.json`):
+```json
+{
+  "TaskName": "rest",
+  "Manufacturer": "Elekta",
+  "ManufacturersModelName": "Triux",
+  "SamplingFrequency": 600.0,
+  "PowerLineFrequency": 50,
+  "MEGChannelCount": 204,
+  "EEGChannelCount": 0,
+  "ECOGChannelCount": 0,
+  "EMGChannelCount": 0,
+  "MEGREFChannelCount": 64,
+  "RecordingType": "continuous",
+  "DewarPosition": "upright",
+  "SoftwareFilters": {
+    "HighpassFilter": {
+      "Cutoff": 0.01
+    },
+    "LowpassFilter": {
+      "Cutoff": 172.0
+    }
+  },
+  "MaxfilterVersion": "2.2.11",
+  "MaxfilterOrigin": [0, 0, 0],
+  "AssociatedEmptyRoom": "sub-XXX_task-noise_meg.fif"
+}
+```
+
+**MEG headshape** (`sub-XXX_headshape.pos`):
+Text file with digitized head surface points (3D coordinates in meters):
+```
+x1 y1 z1
+x2 y2 z2
+...
+```
+
+**Calibration files** (copied to subject directory if present):
+- `sub-XXX_meg_crosstalk.fif`: Cross-talk compensation matrix
+- `sub-XXX_meg_calibration.dat`: Fine-calibration data for MaxFilter
 
 **MRS data** (`sub-XXX_mrs.json`):
 ```json
@@ -716,14 +918,17 @@ Ensure your config files are at:
 - `~/sourcedata/<dataset>-sourcedata/configs/dcm2bids.json`
 - `~/sourcedata/<dataset>-sourcedata/configs/spec2bids.json`
 - `~/sourcedata/<dataset>-sourcedata/configs/physio.json`
+- `~/sourcedata/<dataset>-sourcedata/configs/meg2bids.json`
 
 Or legacy locations:
 - `~/sourcedata/<dataset>-sourcedata/dcm2bids/config.json`
 - `~/sourcedata/<dataset>-sourcedata/spec2bids/config.json`
 - `~/sourcedata/<dataset>-sourcedata/physio/config.json`
+- `~/sourcedata/<dataset>-sourcedata/meg2bids/config.json`
 
+For MEG and MRS imports, the config file is **required**.
 For physio import, the config file is **required** and must contain task-specific DummyVolumes definitions.
-You can also specify a custom config location with `--physio-config /path/to/config.json`.
+You can also specify a custom config location with `--meg-config /path/to/meg2bids.json` or `--physio-config /path/to/physio.json`.
 
 ### Virtual environment not found
 Specify custom path:
@@ -760,6 +965,11 @@ ln2t_tools import --dataset <name> --participant-label 001 002 003
 ln2t_tools import --dataset <name> --participant-label 001 --datatype dicom --deface
 ```
 
+**MEG only**:
+```bash
+ln2t_tools import --dataset <name> --participant-label 001 --datatype meg
+```
+
 **MRS with custom config**:
 ```bash
 ln2t_tools import --dataset <name> --participant-label 001 --datatype mrs --mrs-config /path/to/spec2bids.json
@@ -783,20 +993,24 @@ Files are searched in this order (first found is used):
    - `/path/to/custom/dcm2bids.json`
    - `/path/to/custom/spec2bids.json`
    - `/path/to/custom/physio.json`
+   - `/path/to/custom/meg2bids.json`
 
 2. **Standard location**:
    - `~/sourcedata/<dataset>-sourcedata/configs/dcm2bids.json`
    - `~/sourcedata/<dataset>-sourcedata/configs/spec2bids.json`
    - `~/sourcedata/<dataset>-sourcedata/configs/physio.json`
+   - `~/sourcedata/<dataset>-sourcedata/configs/meg2bids.json`
 
 3. **Legacy locations**:
    - `~/sourcedata/<dataset>-sourcedata/dcm2bids/config.json`
    - `~/sourcedata/<dataset>-sourcedata/spec2bids/config.json`
    - `~/sourcedata/<dataset>-sourcedata/physio/config.json`
+   - `~/sourcedata/<dataset>-sourcedata/meg2bids/config.json`
 
 4. **Defaults**:
    - DICOM: Requires config file (fails if not found)
    - MRS: Requires config file (fails if not found)
+   - MEG: Requires config file (fails if not found)
    - Physio: Uses `DummyVolumes=5` if no config found
 
 ### Essential File Naming
@@ -804,14 +1018,17 @@ Files are searched in this order (first found is used):
 **Source data directories**:
 - Format: `<DS_INITIALS><PARTICIPANT_ID>` (e.g., `CB001`, `HP001SES1`)
 - Must match participant labels and session (if applicable)
-- Located in `~/sourcedata/<dataset>-sourcedata/{dicom,mrs,physio}/`
+- Located in `~/sourcedata/<dataset>-sourcedata/{dicom,mrs,physio,meg}/`
 
 **Output files**:
 - Anatomical: `sub-<label>_T1w.nii.gz`, `sub-<label>_T2w.nii.gz`, etc.
 - Functional: `sub-<label>_task-<task>_run-<run>_bold.nii.gz`
+- MEG: `sub-<label>_task-<task>_run-<run>_meg.fif`
 - Physio: `sub-<label>_task-<task>_physio.tsv.gz`
 - MRS: `sub-<label>_mrs.nii.gz`
-- JSON sidecars for all NIfTI files
+- MEG headshape: `sub-<label>_headshape.pos`
+- MEG calibration: `sub-<label>_meg_crosstalk.fif`, `sub-<label>_meg_calibration.dat`
+- JSON sidecars for all NIfTI and FIF files
 
 ### Virtual Environment Management
 
@@ -844,6 +1061,7 @@ ln2t_tools import --dataset <name> --participant-label 001 --import-env ~/venvs/
 
 ## Future Enhancements
 
+- [x] MEG data import with automatic deduplication
 - [ ] Implement physio data import with phys2bids
 - [ ] Add automatic BIDS validation
 - [ ] Support for custom post-processing hooks
